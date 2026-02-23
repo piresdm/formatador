@@ -2,3 +2,10 @@
   min-height: 140px;
   white-space: pre-wrap;
 }
+
+/* Botão desabilitado mais visível */
+button:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
