@@ -6,6 +6,11 @@ const btnGenerate = document.getElementById("btnGenerate");
 const statusEl = document.getElementById("status");
 const previewEl = document.getElementById("preview");
 
+// NOVO: campos do cabeçalho
+const sessionTypeEl = document.getElementById("sessionType");
+const sessionDateEl = document.getElementById("sessionDate");
+const sessionTimeEl = document.getElementById("sessionTime");
+
 let rows = null;
 
 function setStatus(msg) {
@@ -39,6 +44,14 @@ function groupBy(arr, key) {
   return m;
 }
 
+function formatDateBR(yyyyMmDd) {
+  if (!yyyyMmDd) return "";
+  const [y, m, d] = String(yyyyMmDd).split("-");
+  if (!y || !m || !d) return "";
+  return `${d}/${m}/${y}`;
+}
+
+// ===== Leitura do XLSX =====
 fileInput.addEventListener("change", async (e) => {
   clearPreview();
   rows = null;
@@ -86,64 +99,57 @@ btnPreview.addEventListener("click", () => {
   previewEl.textContent = JSON.stringify(sample, null, 2);
 });
 
+// ===== Geração do DOCX =====
 btnGenerate.addEventListener("click", async () => {
   if (!rows) return;
 
   setStatus("Gerando DOCX...");
 
   try {
-    const {
-      Document,
-      Packer,
-      Paragraph,
-      TextRun,
-      AlignmentType,
-      BorderStyle,
-    } = docx;
+    const { Document, Packer, Paragraph, TextRun, AlignmentType } = docx;
 
-    const SEPARATOR = "______________________________________________________________________________________";
+    const SEPARATOR =
+      "______________________________________________________________________________________";
 
     const makeSeparator = () =>
       new Paragraph({
         children: [new TextRun(SEPARATOR)],
-        spacing: { before: 200, after: 200 },
+        spacing: { before: 180, after: 180 },
       });
 
     const makeRelatorHeader = (relator) =>
       new Paragraph({
         children: [
-          new TextRun({ text: `RELATOR: CONSELHEIRO ${upper(relator)}`, bold: true }),
+          new TextRun({
+            text: `RELATOR: ${upper(relator)}`,
+            bold: true,
+          }),
         ],
-        spacing: { before: 240, after: 120 },
+        spacing: { before: 220, after: 120 },
       });
 
     const makeProcessTitle = (row) => {
-      const sistema = String(row["Sistema de Tramitação"] ?? "").trim().toUpperCase();
+      const sistema = upper(row["Sistema de Tramitação"]);
       const proc = String(row["Processo"] ?? "").trim();
-      const voto = String(row["Voto"] ?? "").trim();
+      const voto = upper(row["Voto"]);
 
       let label = "PROCESSO";
-      let numeroLabel = "Nº";
       let color = "000000";
 
-      if (sistema === "E-TCE" || sistema === "E-TCE ") {
+      if (sistema === "E-TCE") {
         label = "PROCESSO ELETRÔNICO eTCE";
         color = "FF0000"; // vermelho
       } else if (sistema === "AP") {
         label = "PROCESSO DIGITAL TCE";
         color = "0070C0"; // azul
-      } else {
-        // fallback: sem cor/padrão
-        label = "PROCESSO";
-        color = "000000";
       }
 
-      const suffix = voto.toUpperCase() === "LISTADO" ? " (Voto em lista)" : "";
+      const suffix = voto === "LISTADO" ? " (Voto em lista)" : "";
 
       return new Paragraph({
         children: [
           new TextRun({
-            text: `${label} ${numeroLabel} ${proc}${suffix}`,
+            text: `${label} Nº ${proc}${suffix}`,
             bold: true,
             color,
           }),
@@ -170,35 +176,58 @@ btnGenerate.addEventListener("click", async () => {
         spacing: { after: 20 },
       });
 
-    // Limpa linhas vazias e garante Relator
+    // ===== Cabeçalho vindo da UI =====
+    const sessionType = sessionTypeEl?.value || "PLENO";
+    const sessionDate = formatDateBR(sessionDateEl?.value);
+    const sessionTime = sessionTimeEl?.value || "";
+
+    const children = [];
+
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `PAUTA DA SESSÃO ORDINÁRIA DO ${sessionType}`,
+            bold: true,
+            size: 28,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 120 },
+      })
+    );
+
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: `DATA: ${sessionDate}`, bold: true })],
+        spacing: { after: 40 },
+      })
+    );
+
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: `HORÁRIO: ${sessionTime}`, bold: true })],
+        spacing: { after: 120 },
+      })
+    );
+
+    children.push(makeSeparator());
+
+    // ===== Agrupar por relator =====
     const cleaned = rows
-      .map((r) => ({
-        ...r,
-        Relator: String(r["Relator"] ?? "").trim(),
-      }))
+      .map((r) => ({ ...r, Relator: String(r["Relator"] ?? "").trim() }))
       .filter((r) => r.Relator);
 
     const byRelator = groupBy(cleaned, "Relator");
 
-    const children = [];
-
-    // (Opcional) Cabeçalho fixo simples — você pode depois colocar inputs de Data/Hora
-    children.push(
-      new Paragraph({
-        children: [new TextRun({ text: "PAUTA", bold: true, size: 28 })],
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 200 },
-      })
-    );
-
     for (const [relator, items] of byRelator.entries()) {
-      children.push(makeSeparator());
       children.push(makeRelatorHeader(relator));
+      children.push(new Paragraph({ text: "", spacing: { after: 60 } }));
 
       for (const row of items) {
         children.push(makeProcessTitle(row));
 
-        // Órgão
+        // Órgão (normalmente já vem com "- ano")
         children.push(makeUpperLine(row["Órgão"]));
 
         // Tipo Processo
@@ -208,23 +237,23 @@ btnGenerate.addEventListener("click", async () => {
         const interessados = splitLines(row["Interessados"]);
         for (const it of interessados) children.push(makePlainLine(it));
 
-        // Advogados (1 por linha)
+        // Advogados (1 por linha, com prefixo Adv.)
         const advs = splitLines(row["Advogados"]);
         for (const adv of advs) children.push(makeAdvLine(adv));
 
         // Espaço entre processos
-        children.push(new Paragraph({ text: "", spacing: { after: 120 } }));
+        children.push(new Paragraph({ text: "", spacing: { after: 140 } }));
       }
-    }
 
-    // Linha final
-    children.push(makeSeparator());
+      children.push(makeSeparator());
+    }
 
     const doc = new Document({
       sections: [{ children }],
     });
 
     const blob = await Packer.toBlob(doc);
+
     const filename = `pauta_${new Date().toISOString().slice(0, 10)}.docx`;
     saveAs(blob, filename);
 
