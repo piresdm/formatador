@@ -16,30 +16,34 @@ const FONT = "Roboto";
 const SIZE_HEADER = 22; // 11pt
 const SIZE_BODY = 20;   // 10pt
 
+// Espaçamentos (tweak aqui)
+const SPACE_AFTER_TITLE = 120;
+const SPACE_AFTER_PROCESS_LINE = 120;
+const SPACE_AFTER_ORGAO = 80;
+const SPACE_AFTER_TIPO = 80;
+const SPACE_AFTER_INTERESSADO = 60;
+const SPACE_AFTER_ADV = 50;
+
 function setStatus(msg) {
   statusEl.textContent = msg;
 }
 
 function splitLines(value) {
   if (!value) return [];
-  return String(value)
-    .split(/\r?\n/)
-    .map(v => v.trim())
-    .filter(Boolean);
+  return String(value).split(/\r?\n/).map(v => v.trim()).filter(Boolean);
 }
 
 function upper(v) {
   return String(v ?? "").trim().toUpperCase();
 }
 
-function groupBy(arr, key) {
-  const map = new Map();
-  for (const item of arr) {
-    const k = String(item[key] ?? "").trim();
-    if (!map.has(k)) map.set(k, []);
-    map.get(k).push(item);
-  }
-  return map;
+// remove acentos e normaliza pra comparação
+function normalizeName(s) {
+  return String(s ?? "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function formatDateBR(date) {
@@ -64,25 +68,13 @@ function headerOk() {
 }
 
 function updateButtons() {
-  // Preview só depende de ter lido o arquivo
   btnPreview.disabled = !rows;
-
-  // Gerar depende do arquivo + cabeçalho preenchido
   btnGenerate.disabled = !(rows && headerOk());
-
-  if (!rows) {
-    setStatus("Nenhum arquivo selecionado.");
-    return;
-  }
-  if (!headerOk()) {
-    setStatus("Arquivo carregado. Preencha Nº da sessão, Tipo de sessão e Data para liberar a geração.");
-    return;
-  }
-  setStatus("Pronto para gerar.");
 }
 
-// Listeners para reavaliar os botões
-[fileInput, sessionNumberEl, sessionTypeEl, sessionDateEl].forEach((el) => {
+updateButtons();
+
+[sessionNumberEl, sessionTypeEl, sessionDateEl].forEach((el) => {
   if (!el) return;
   el.addEventListener("input", updateButtons);
   el.addEventListener("change", updateButtons);
@@ -92,22 +84,20 @@ function updateButtons() {
 fileInput.addEventListener("change", async (e) => {
   previewEl.textContent = "";
   rows = null;
+  updateButtons();
 
   const file = e.target.files?.[0];
   if (!file) {
-    updateButtons();
+    setStatus("Nenhum arquivo selecionado.");
     return;
   }
 
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
-    rows = null;
-    btnPreview.disabled = true;
-    btnGenerate.disabled = true;
     setStatus("Selecione um arquivo .xlsx.");
     return;
   }
 
-  setStatus("Lendo arquivo...");
+  setStatus("Lendo XLSX...");
 
   try {
     const arrayBuffer = await file.arrayBuffer();
@@ -115,24 +105,42 @@ fileInput.addEventListener("change", async (e) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-    setStatus(`Arquivo carregado. Linhas: ${rows.length}`);
+    setStatus(`XLSX OK. Linhas: ${rows.length}.`);
     updateButtons();
   } catch (err) {
     console.error(err);
+    setStatus("Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
     rows = null;
-    setStatus("Erro ao ler o arquivo. Veja o console do navegador.");
     updateButtons();
   }
 });
 
-// ===== Pré-visualização =====
+// ===== Prévia =====
 btnPreview.addEventListener("click", () => {
   if (!rows) return;
-  const sample = rows.slice(0, 10);
-  previewEl.textContent = JSON.stringify(sample, null, 2);
+  previewEl.textContent = JSON.stringify(rows.slice(0, 10), null, 2);
 });
 
-// ===== Geração do DOCX =====
+// ===== Regras de tipo do relator =====
+const CONSELHEIROS = [
+  "VALDECIR PASCOAL",
+  "RANILSON RAMOS",
+  "DIRCEU RODOLFO DE MELO JUNIOR",
+  "MARCOS LORETO",
+  "CARLOS NEVES",
+  "EDUARDO LYRA PORTO",
+  "RODRIGO NOVAES",
+].map(normalizeName);
+
+function relatorPrefix(relatorRaw) {
+  const n = normalizeName(relatorRaw);
+
+  // heurística: se o nome do relator "contém" o nome-chave, marca como conselheiro
+  const isConselheiro = CONSELHEIROS.some((key) => n.includes(key));
+  return isConselheiro ? "CONSELHEIRO" : "CONSELHEIRO SUBSTITUTO";
+}
+
+// ===== DOCX =====
 btnGenerate.addEventListener("click", async () => {
   if (!rows) return;
   if (!headerOk()) {
@@ -151,7 +159,19 @@ btnGenerate.addEventListener("click", async () => {
 
     const children = [];
 
-    // Cabeçalho centralizado (igual ao modelo)
+    const separator = () =>
+      new Paragraph({
+        children: [new TextRun("______________________________________________________________________________________")],
+        spacing: { before: 0, after: 0 },
+      });
+
+    const blankLine = (after = 80) =>
+      new Paragraph({
+        children: [new TextRun(" ")],
+        spacing: { after },
+      });
+
+    // ===== Cabeçalho centralizado =====
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
@@ -163,7 +183,7 @@ btnGenerate.addEventListener("click", async () => {
             font: FONT,
           }),
         ],
-        spacing: { after: 80 },
+        spacing: { after: 120 },
       })
     );
 
@@ -178,7 +198,7 @@ btnGenerate.addEventListener("click", async () => {
             font: FONT,
           }),
         ],
-        spacing: { after: 40 },
+        spacing: { after: 80 },
       })
     );
 
@@ -193,34 +213,40 @@ btnGenerate.addEventListener("click", async () => {
             font: FONT,
           }),
         ],
-        spacing: { after: 100 },
+        spacing: { after: 140 },
       })
     );
 
-    children.push(
-      new Paragraph({
-        children: [new TextRun("______________________________________________________________________________________")],
-      })
-    );
+    children.push(separator());
 
-    // Agrupa por relator
-    const grouped = groupBy(rows, "Relator");
+    // Agrupa por relator (mantém ordem de aparição)
+    const grouped = new Map();
+    for (const r of rows) {
+      const rel = String(r["Relator"] ?? "").trim();
+      if (!grouped.has(rel)) grouped.set(rel, []);
+      grouped.get(rel).push(r);
+    }
 
     for (const [relator, processos] of grouped.entries()) {
-      // Relator: negrito, tamanho 11
+      const prefix = relatorPrefix(relator);
+
+      // RELATOR: em negrito, tamanho 11
       children.push(
         new Paragraph({
           children: [
             new TextRun({
-              text: `RELATOR: ${upper(relator)}`,
+              text: `RELATOR: ${prefix} ${upper(relator)}`,
               bold: true,
               size: SIZE_HEADER,
               font: FONT,
             }),
           ],
-          spacing: { before: 200, after: 100 },
+          spacing: { before: 240, after: 0 },
         })
       );
+
+      // (2) Linha em branco entre relator e primeiro processo
+      children.push(blankLine(120));
 
       for (const row of processos) {
         const sistema = upper(row["Sistema de Tramitação"]);
@@ -229,7 +255,6 @@ btnGenerate.addEventListener("click", async () => {
 
         let label = "PROCESSO";
         let color = "000000";
-
         if (sistema === "E-TCE") {
           label = "PROCESSO ELETRÔNICO eTCE";
           color = "FF0000";
@@ -238,10 +263,7 @@ btnGenerate.addEventListener("click", async () => {
           color = "0070C0";
         }
 
-        // Linha do processo:
-        // - label colorido
-        // - Nº + número + (Voto em lista) preto
-        // - tudo em negrito (porque não é órgão/interessado/adv)
+        // Linha do processo (negrito). Só o label colorido.
         children.push(
           new Paragraph({
             children: [
@@ -260,21 +282,22 @@ btnGenerate.addEventListener("click", async () => {
                 font: FONT,
               }),
             ],
-            spacing: { after: 60 },
+            spacing: { after: SPACE_AFTER_PROCESS_LINE },
           })
         );
 
-        // Órgão: SEM negrito
+        // (1) Órgão: AGORA EM NEGRITO
         children.push(
           new Paragraph({
             children: [
               new TextRun({
                 text: upper(row["Órgão"]),
-                bold: false,
+                bold: true,
                 size: SIZE_BODY,
                 font: FONT,
               }),
             ],
+            spacing: { after: SPACE_AFTER_ORGAO },
           })
         );
 
@@ -289,10 +312,11 @@ btnGenerate.addEventListener("click", async () => {
                 font: FONT,
               }),
             ],
+            spacing: { after: SPACE_AFTER_TIPO },
           })
         );
 
-        // Interessados: SEM negrito
+        // Interessados: sem negrito
         splitLines(row["Interessados"]).forEach((i) => {
           children.push(
             new Paragraph({
@@ -304,11 +328,12 @@ btnGenerate.addEventListener("click", async () => {
                   font: FONT,
                 }),
               ],
+              spacing: { after: SPACE_AFTER_INTERESSADO },
             })
           );
         });
 
-        // Advogados: SEM negrito
+        // Advogados: sem negrito
         splitLines(row["Advogados"]).forEach((a) => {
           children.push(
             new Paragraph({
@@ -320,18 +345,16 @@ btnGenerate.addEventListener("click", async () => {
                   font: FONT,
                 }),
               ],
+              spacing: { after: SPACE_AFTER_ADV },
             })
           );
         });
 
-        children.push(new Paragraph({ text: "" }));
+        // Espaço entre processos (um respiro)
+        children.push(blankLine(120));
       }
 
-      children.push(
-        new Paragraph({
-          children: [new TextRun("______________________________________________________________________________________")],
-        })
-      );
+      children.push(separator());
     }
 
     const doc = new Document({ sections: [{ children }] });
@@ -343,9 +366,6 @@ btnGenerate.addEventListener("click", async () => {
     setStatus(`DOCX gerado: ${filename}`);
   } catch (err) {
     console.error(err);
-    setStatus("Erro ao gerar DOCX. Veja o console do navegador.");
+    setStatus("Erro ao gerar DOCX. Abra o Console (F12) e veja o erro.");
   }
 });
-
-// Estado inicial
-updateButtons();
