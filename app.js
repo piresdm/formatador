@@ -6,10 +6,10 @@ const btnGenerate = document.getElementById("btnGenerate");
 const statusEl = document.getElementById("status");
 const previewEl = document.getElementById("preview");
 
-// NOVO: campos do cabeçalho
+// Campos de cabeçalho (obrigatórios)
+const sessionNumberEl = document.getElementById("sessionNumber");
 const sessionTypeEl = document.getElementById("sessionType");
 const sessionDateEl = document.getElementById("sessionDate");
-const sessionTimeEl = document.getElementById("sessionTime");
 
 let rows = null;
 
@@ -51,6 +51,57 @@ function formatDateBR(yyyyMmDd) {
   return `${d}/${m}/${y}`;
 }
 
+// 1 -> 1ª, 2 -> 2ª, 3 -> 3ª ...
+function ordinalFeminino(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num < 1) return "";
+  return `${Math.trunc(num)}ª`;
+}
+
+function getHeaderValues() {
+  const sessionNumberRaw = String(sessionNumberEl?.value ?? "").trim();
+  const sessionType = String(sessionTypeEl?.value ?? "").trim();
+  const sessionDate = String(sessionDateEl?.value ?? "").trim();
+
+  const sessionNumberOrd = ordinalFeminino(sessionNumberRaw);
+  const dateBR = formatDateBR(sessionDate);
+
+  return { sessionNumberOrd, sessionType, dateBR };
+}
+
+function canGenerate() {
+  const { sessionNumberOrd, sessionType, dateBR } = getHeaderValues();
+  const hasFileRows = Array.isArray(rows) && rows.length >= 0; // permite vazio, mas tem que ter lido
+  const headerOk = !!sessionNumberOrd && !!sessionType && !!dateBR;
+  return hasFileRows && headerOk;
+}
+
+function updateButtons() {
+  const headerOk = !!getHeaderValues().sessionNumberOrd && !!getHeaderValues().sessionType && !!getHeaderValues().dateBR;
+
+  btnPreview.disabled = !rows; // preview só depende do xlsx lido
+  btnGenerate.disabled = !(rows && headerOk);
+
+  if (!rows) {
+    setStatus("Nenhum arquivo selecionado.");
+    return;
+  }
+
+  if (!headerOk) {
+    setStatus("Preencha Nº da sessão, Tipo de sessão e Data para liberar a geração.");
+    return;
+  }
+
+  setStatus("Pronto para gerar.");
+}
+
+// Reagir a mudanças nos campos do cabeçalho
+[sessionNumberEl, sessionTypeEl, sessionDateEl].forEach((el) => {
+  if (!el) return;
+  el.addEventListener("input", updateButtons);
+  el.addEventListener("change", updateButtons);
+});
+
 // ===== Leitura do XLSX =====
 fileInput.addEventListener("change", async (e) => {
   clearPreview();
@@ -58,9 +109,7 @@ fileInput.addEventListener("change", async (e) => {
 
   const file = e.target.files?.[0];
   if (!file) {
-    btnPreview.disabled = true;
-    btnGenerate.disabled = true;
-    setStatus("Nenhum arquivo selecionado.");
+    updateButtons();
     return;
   }
 
@@ -81,12 +130,11 @@ fileInput.addEventListener("change", async (e) => {
 
     rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-    btnPreview.disabled = false;
-    btnGenerate.disabled = false;
-
     setStatus(`OK: ${file.name} | Aba: "${firstSheetName}" | Linhas: ${rows.length}`);
+    updateButtons();
   } catch (err) {
     console.error(err);
+    rows = null;
     btnPreview.disabled = true;
     btnGenerate.disabled = true;
     setStatus("Erro ao ler o arquivo. Veja o console do navegador.");
@@ -103,6 +151,12 @@ btnPreview.addEventListener("click", () => {
 btnGenerate.addEventListener("click", async () => {
   if (!rows) return;
 
+  const { sessionNumberOrd, sessionType, dateBR } = getHeaderValues();
+  if (!sessionNumberOrd || !sessionType || !dateBR) {
+    setStatus("Preencha Nº da sessão, Tipo de sessão e Data.");
+    return;
+  }
+
   setStatus("Gerando DOCX...");
 
   try {
@@ -114,9 +168,10 @@ btnGenerate.addEventListener("click", async () => {
     const makeSeparator = () =>
       new Paragraph({
         children: [new TextRun(SEPARATOR)],
-        spacing: { before: 180, after: 180 },
+        spacing: { before: 0, after: 0 },
       });
 
+    // No seu modelo: RELATOR em negrito (linha toda) :contentReference[oaicite:1]{index=1}
     const makeRelatorHeader = (relator) =>
       new Paragraph({
         children: [
@@ -125,9 +180,12 @@ btnGenerate.addEventListener("click", async () => {
             bold: true,
           }),
         ],
-        spacing: { before: 220, after: 120 },
+        spacing: { before: 240, after: 120 },
       });
 
+    // Linha do processo:
+    // - SOMENTE o rótulo colorido
+    // - "Nº {proc} (Voto em lista)" preto
     const makeProcessTitle = (row) => {
       const sistema = upper(row["Sistema de Tramitação"]);
       const proc = String(row["Processo"] ?? "").trim();
@@ -148,67 +206,63 @@ btnGenerate.addEventListener("click", async () => {
 
       return new Paragraph({
         children: [
-          new TextRun({
-            text: `${label} Nº ${proc}${suffix}`,
-            bold: true,
-            color,
-          }),
+          new TextRun({ text: `${label} `, bold: true, color }), // colorido
+          new TextRun({ text: `Nº ${proc}${suffix}`, bold: true, color: "000000" }), // preto
         ],
-        spacing: { before: 140, after: 80 },
+        spacing: { before: 120, after: 80 },
       });
     };
 
+    // Órgão e Tipo Processo aparecem em caixa alta, sem negrito no modelo :contentReference[oaicite:2]{index=2}
     const makeUpperLine = (text) =>
       new Paragraph({
         children: [new TextRun({ text: upper(text) })],
         spacing: { after: 40 },
       });
 
+    // Interessados sem parênteses, 1 por linha
     const makePlainLine = (text) =>
       new Paragraph({
         children: [new TextRun({ text: String(text ?? "").trim() })],
-        spacing: { after: 40 },
-      });
-
-    const makeAdvLine = (lawyer) =>
-      new Paragraph({
-        children: [new TextRun({ text: `(Adv. ${lawyer})` })],
         spacing: { after: 20 },
       });
 
-    // ===== Cabeçalho vindo da UI =====
-    const sessionType = sessionTypeEl?.value || "PLENO";
-    const sessionDate = formatDateBR(sessionDateEl?.value);
+    // Advogados com (Adv. ...)
+    const makeAdvLine = (lawyer) =>
+      new Paragraph({
+        children: [new TextRun({ text: `(Adv. ${lawyer})` })],
+        spacing: { after: 10 },
+      });
 
+    // ===== Cabeçalho igual ao modelo (com ordinal e horário fixo) :contentReference[oaicite:3]{index=3} =====
     const children = [];
 
     children.push(
       new Paragraph({
         children: [
           new TextRun({
-            text: `PAUTA DA SESSÃO ORDINÁRIA DO ${sessionType}`,
+            text: `PAUTA DA ${sessionNumberOrd} SESSÃO ORDINÁRIA DO ${upper(sessionType)}`,
             bold: true,
             size: 28,
           }),
         ],
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 120 },
+        spacing: { after: 80 },
       })
     );
 
     children.push(
       new Paragraph({
-        children: [new TextRun({ text: `DATA: ${sessionDate}`, bold: true })],
+        children: [new TextRun({ text: `DATA: ${dateBR}`, bold: true })],
         spacing: { after: 40 },
       })
     );
 
-      children.push(
-    new Paragraph({
-      children: [new TextRun({ text: `HORÁRIO: 10h`, bold: true })],
-      spacing: { after: 120 },
-    })
-  );
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: `HORÁRIO: 10h`, bold: true })],
+        spacing: { after: 60 },
+      })
+    );
 
     children.push(makeSeparator());
 
@@ -221,12 +275,12 @@ btnGenerate.addEventListener("click", async () => {
 
     for (const [relator, items] of byRelator.entries()) {
       children.push(makeRelatorHeader(relator));
-      children.push(new Paragraph({ text: "", spacing: { after: 60 } }));
+      children.push(new Paragraph({ text: "" }));
 
       for (const row of items) {
         children.push(makeProcessTitle(row));
 
-        // Órgão (normalmente já vem com "- ano")
+        // Órgão
         children.push(makeUpperLine(row["Órgão"]));
 
         // Tipo Processo
@@ -236,12 +290,12 @@ btnGenerate.addEventListener("click", async () => {
         const interessados = splitLines(row["Interessados"]);
         for (const it of interessados) children.push(makePlainLine(it));
 
-        // Advogados (1 por linha, com prefixo Adv.)
+        // Advogados (1 por linha)
         const advs = splitLines(row["Advogados"]);
         for (const adv of advs) children.push(makeAdvLine(adv));
 
         // Espaço entre processos
-        children.push(new Paragraph({ text: "", spacing: { after: 140 } }));
+        children.push(new Paragraph({ text: "", spacing: { after: 120 } }));
       }
 
       children.push(makeSeparator());
@@ -253,7 +307,8 @@ btnGenerate.addEventListener("click", async () => {
 
     const blob = await Packer.toBlob(doc);
 
-    const filename = `pauta_${new Date().toISOString().slice(0, 10)}.docx`;
+    // Nome do arquivo com data escolhida
+    const filename = `pauta_${dateBR.replaceAll("/", "-")}.docx`;
     saveAs(blob, filename);
 
     setStatus(`DOCX gerado: ${filename}`);
@@ -262,3 +317,6 @@ btnGenerate.addEventListener("click", async () => {
     setStatus("Erro ao gerar DOCX. Veja o console do navegador.");
   }
 });
+
+// Estado inicial
+updateButtons();
