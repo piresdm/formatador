@@ -179,7 +179,6 @@ btnGenerate.addEventListener("click", async () => {
     // ===== Cabeçalho vindo da UI =====
     const sessionType = sessionTypeEl?.value || "PLENO";
     const sessionDate = formatDateBR(sessionDateEl?.value);
-    const sessionTime = sessionTimeEl?.value || "";
 
     const children = [];
 
@@ -204,12 +203,12 @@ btnGenerate.addEventListener("click", async () => {
       })
     );
 
-    children.push(
-      new Paragraph({
-        children: [new TextRun({ text: `HORÁRIO: ${sessionTime}`, bold: true })],
-        spacing: { after: 120 },
-      })
-    );
+      children.push(
+    new Paragraph({
+      children: [new TextRun({ text: `HORÁRIO: 10h`, bold: true })],
+      spacing: { after: 120 },
+    })
+  );
 
     children.push(makeSeparator());
 
