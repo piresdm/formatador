@@ -20,6 +20,26 @@
 
       <div class="card">
         <div class="card-body">
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label for="sessionType" class="form-label">Tipo de sessão</label>
+              <select id="sessionType" class="form-select">
+                <option value="PLENO">Pleno</option>
+                <option value="PRIMEIRA CÂMARA">Primeira Câmara</option>
+                <option value="SEGUNDA CÂMARA">Segunda Câmara</option>
+              </select>
+            </div>
+          
+            <div class="col-md-3">
+              <label for="sessionDate" class="form-label">Data</label>
+              <input id="sessionDate" type="date" class="form-control" />
+            </div>
+          
+            <div class="col-md-3">
+              <label for="sessionTime" class="form-label">Horário</label>
+              <input id="sessionTime" type="time" class="form-control" />
+            </div>
+          </div>
           <label for="fileInput" class="form-label">Selecione o arquivo .xlsx</label>
           <input class="form-control" type="file" id="fileInput" accept=".xlsx" />
 
