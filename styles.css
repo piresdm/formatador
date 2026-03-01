@@ -9,3 +9,8 @@ button:disabled {
   cursor: not-allowed !important;
   box-shadow: none !important;
 }
+
+/* Um respiro padrão para módulos */
+.module-card {
+  margin-top: 12px;
+}
