@@ -35,7 +35,6 @@ export function mount(container) {
           <div class="col-12">
             <label for="fileInputR" class="form-label">Selecione o arquivo .xlsx</label>
 
-            <!-- X à esquerda + input menor ao lado -->
             <div class="row g-2 align-items-center">
               <div class="col-auto">
                 <button
@@ -106,6 +105,25 @@ export function mount(container) {
     "Julgado",
   ]);
 
+  // ===== Ordens fixas dos resumos =====
+  const ORDEM_PRE = [
+    "Preferência",
+    "Preferência e Sustentação Oral",
+    "Pauta",
+    "Extrapauta",
+    "Destaque Sessão Virtual",
+    "Devolução Vista",
+    "Retorno de Adiantamento",
+  ];
+
+  const ORDEM_POS = [
+    "Julgado",
+    "Retirado de Pauta",
+    "Pedido de Vista",
+    "Adiado",
+    "Sobrestado",
+  ];
+
   // ===== Listeners cleanup =====
   const listeners = [];
   function on(el, evt, fn) {
@@ -148,7 +166,7 @@ export function mount(container) {
     on(el, "change", updateButtons);
   });
 
-  // ===== Carregar logo do repo (1x) =====
+  // ===== Logo do repo (1x) =====
   async function loadLogoOnce() {
     if (logoDataUrl) return logoDataUrl;
 
@@ -173,6 +191,27 @@ export function mount(container) {
     });
   }
 
+  // ===== Normalizações de texto / Processo =====
+  function normalizeProcText(s) {
+    return String(s ?? "")
+      .replaceAll("\r", " ")
+      .replaceAll("\n", " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function splitVinculado(procRaw) {
+    // remove ícone que bugava no PDF
+    const cleaned = normalizeProcText(procRaw).replaceAll("⚠️", "").trim();
+
+    const idx = cleaned.toUpperCase().indexOf("VINCULADO");
+    if (idx === -1) return { numero: cleaned, vinculado: "" };
+
+    const numero = cleaned.slice(0, idx).trim();
+    const vinculado = cleaned.slice(idx).trim();
+    return { numero, vinculado };
+  }
+
   // ===== Reset =====
   function clearLoadedFileState() {
     allRows = null;
@@ -188,13 +227,12 @@ export function mount(container) {
     sessionDateEl.value = "";
     clearLoadedFileState();
     updateButtons();
-    // Sem popup aqui (você não pediu confirmação)
   }
 
   // X: remove sem mensagem
   on(btnClearFileX, "click", clearLoadedFileState);
 
-  // Limpar tudo: sem mensagem
+  // Limpar: sem mensagem
   on(btnClearAll, "click", clearAllFields);
 
   // ===== Leitura do XLSX =====
@@ -231,7 +269,7 @@ export function mount(container) {
     try {
       const arrayBuffer = await file.arrayBuffer();
 
-      // Evita conversão automática para Date (reduz bug de fuso/UTC)
+      // evita conversão automática para Date
       const workbook = window.XLSX.read(arrayBuffer, { type: "array", cellDates: false });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
@@ -258,7 +296,7 @@ export function mount(container) {
   function excelCellToYmd(value) {
     if (!value) return "";
 
-    // Número do Excel (ideal)
+    // número Excel (ideal)
     if (typeof value === "number" && window.XLSX?.SSF?.parse_date_code) {
       const parsed = window.XLSX.SSF.parse_date_code(value);
       if (!parsed) return "";
@@ -268,7 +306,7 @@ export function mount(container) {
       return `${y}-${m}-${d}`;
     }
 
-    // Se vier como Date, usa UTC para não “voltar um dia”
+    // se vier como Date, usa UTC
     if (value instanceof Date && !isNaN(value.getTime())) {
       const y = value.getUTCFullYear();
       const m = String(value.getUTCMonth() + 1).padStart(2, "0");
@@ -359,7 +397,7 @@ export function mount(container) {
     ];
 
     for (const r of filtered) {
-      const processo = String(r["Processo"] ?? "").trim() || "(sem processo)";
+      const processo = normalizeProcText(r["Processo"]) || "(sem processo)";
       const relator = String(r["Relator"] ?? "").trim();
       const orgao = String(r["Órgão"] ?? "").trim() || "(sem órgão)";
       const rel2 = relator2Nomes(relator) || "(sem relator)";
@@ -390,6 +428,27 @@ export function mount(container) {
     return { ok: true, rows: filtered, message: "" };
   }
 
+  // ===== Resumos (ordenados) =====
+  function countByFieldOrdered(rows, fieldName, orderArr) {
+    const counts = new Map();
+    for (const r of rows) {
+      const v = String(r[fieldName] ?? "").trim();
+      if (!v) continue;
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+
+    const out = [];
+    for (const k of orderArr) {
+      const n = counts.get(k) || 0;
+      if (n > 0) out.push([k, n]);
+    }
+    return out;
+  }
+
+  function sumEntries(entries) {
+    return entries.reduce((acc, [, n]) => acc + (Number(n) || 0), 0);
+  }
+
   // ===== Cores =====
   function statusColorHex(statusFinal) {
     if (statusFinal === "Julgado") return "#1B5E20";
@@ -414,19 +473,6 @@ export function mount(container) {
     return { map, order };
   }
 
-  // ===== Resumos =====
-  function countByField(rows, fieldName) {
-    const counts = new Map();
-    for (const r of rows) {
-      const v = String(r[fieldName] ?? "").trim();
-      if (!v) continue;
-      counts.set(v, (counts.get(v) || 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .filter(([, n]) => n > 0)
-      .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"));
-  }
-
   // ===== PDF =====
   async function generatePdf(rows) {
     if (!window.pdfMake) throw new Error("Não foi possível gerar o PDF no momento.");
@@ -439,100 +485,134 @@ export function mount(container) {
 
     const { map, order } = groupByRelatorPreserveOrder(rows);
 
-    const pre = countByField(rows, "Status");
-    const post = countByField(rows, "Status Final");
+    const pre = countByFieldOrdered(rows, "Status", ORDEM_PRE);
+    const post = countByFieldOrdered(rows, "Status Final", ORDEM_POS);
 
-    const relatorDest = new Map();
+    const totalProcessos = rows.length;
+    const totalPre = sumEntries(pre);
+    const totalPos = sumEntries(post);
+
+    // IDs para pageReference
     const processoDest = new Map();
     for (const rel of order) {
-      relatorDest.set(rel, `REL_${hashId(rel)}`);
       const ps = map.get(rel) || [];
       for (const r of ps) {
-        const proc = String(r["Processo"] ?? "").trim();
-        if (!proc) continue;
-        processoDest.set(proc, `P_${hashId(rel + "|" + proc)}`);
+        const procRaw = r["Processo"];
+        const { numero } = splitVinculado(procRaw);
+        const key = normalizeProcText(procRaw) || numero;
+        if (!key) continue;
+
+        const id = `P_${hashId(rel + "|" + key)}`;
+        processoDest.set(key, id);
+        if (numero) processoDest.set(numero, id);
       }
     }
 
     const content = [];
 
-    content.push({ image: "logo", width: 70, alignment: "left", margin: [0, 0, 0, 8] });
+    // Logo
+    content.push({ image: "logo", width: 70, alignment: "left", margin: [0, 0, 0, 10] });
 
+    // Cabeçalho (destaque 12)
     content.push({
       text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`,
       alignment: "center",
       bold: true,
-      fontSize: 14,
+      fontSize: 12,
       margin: [0, 0, 0, 6],
     });
     content.push({
       text: `DATA: ${dateBR}`,
       alignment: "center",
       bold: true,
-      fontSize: 14,
+      fontSize: 12,
       margin: [0, 0, 0, 6],
     });
     content.push({
       text: `HORÁRIO: 10h`,
       alignment: "center",
       bold: true,
-      fontSize: 14,
-      margin: [0, 0, 0, 14],
+      fontSize: 12,
+      margin: [0, 0, 0, 18], // mais espaço antes dos resumos
     });
 
+    // Resumos (mais espaço antes do índice)
     content.push({
-      columns: [summaryBox("Resumo pré-sessão", pre), summaryBox("Resumo pós-sessão", post)],
-      columnGap: 12,
-      margin: [0, 0, 0, 14],
+      columns: [
+        summaryBox("Status dos Processos – Início da Sessão", pre, totalProcessos, totalPre),
+        summaryBox("Status dos Processos – Final da Sessão", post, totalProcessos, totalPos),
+      ],
+      columnGap: 16,
+      margin: [0, 0, 0, 26], // separação maior do índice
     });
 
-    content.push({ text: "ÍNDICE (por Relator)", bold: true, fontSize: 12, margin: [0, 0, 0, 8] });
+    // Índice (sem "(por Relator)")
+    content.push({ text: "ÍNDICE", bold: true, fontSize: 12, margin: [0, 0, 0, 12] });
 
-    for (const rel of order) {
-      const relId = relatorDest.get(rel);
+    // Índice: relator + lista com página, sem links
+    for (let idxRel = 0; idxRel < order.length; idxRel++) {
+      const rel = order[idxRel];
+      const ps = map.get(rel) || [];
+
+      const topGap = idxRel === 0 ? 0 : 18; // maior entre um relator e outro
 
       content.push({
         text: `RELATOR: ${upper(rel)}`,
         bold: true,
-        margin: [0, 6, 0, 4],
-        linkToDestination: relId,
-        color: "#111827",
+        fontSize: 12,
+        margin: [0, topGap, 0, 10], // maior do relator para o primeiro item
       });
 
-      const ps = map.get(rel) || [];
       for (const r of ps) {
-        const proc = String(r["Processo"] ?? "").trim();
+        const procRaw = r["Processo"];
         const orgao = String(r["Órgão"] ?? "").trim();
         const stFim = String(r["Status Final"] ?? "").trim();
-        const dest = processoDest.get(proc);
+
+        const { numero, vinculado } = splitVinculado(procRaw);
+        const key = normalizeProcText(procRaw) || numero;
+        const dest = processoDest.get(key) || processoDest.get(numero);
+
+        const leftText = vinculado
+          ? [
+              { text: `${numero} `, bold: true },
+              { text: vinculado, color: "#B91C1C", bold: true }, // vermelho
+              { text: ` — ${stFim} — ${orgao}` },
+            ]
+          : [{ text: `${numero} — ${stFim} — ${orgao}` }];
 
         content.push({
-          text: `${proc} — ${stFim} — ${orgao}`,
-          margin: [12, 0, 0, 2],
-          linkToDestination: dest,
-          color: "#0F172A",
-        });
-
-        content.push({
-          text: rel,
-          margin: [12, 0, 0, 6],
-          fontSize: 9,
-          color: "#374151",
+          columns: [
+            {
+              width: "*",
+              text: leftText,
+              fontSize: 11,
+              margin: [12, 0, 10, 3],
+            },
+            {
+              width: 55,
+              alignment: "right",
+              text: dest ? [{ text: "p. " }, { text: "", pageReference: dest }] : "—",
+              fontSize: 11,
+              margin: [0, 0, 0, 3],
+            },
+          ],
         });
       }
     }
 
+    // Seções por relator (nova página)
     for (const rel of order) {
       const ps = map.get(rel) || [];
-      const relId = relatorDest.get(rel);
 
       content.push({ text: "", pageBreak: "before" });
-      content.push({ text: "", id: relId });
-
-      content.push({ text: upper(rel), bold: true, fontSize: 13, margin: [0, 0, 0, 10] });
+      content.push({ text: upper(rel), bold: true, fontSize: 12, margin: [0, 0, 0, 12] });
 
       for (const r of ps) {
-        const proc = String(r["Processo"] ?? "").trim();
+        const procRaw = r["Processo"];
+        const { numero, vinculado } = splitVinculado(procRaw);
+        const key = normalizeProcText(procRaw) || numero;
+        const procId = processoDest.get(key) || processoDest.get(numero);
+
         const orgao = String(r["Órgão"] ?? "").trim();
         const stIni = String(r["Status"] ?? "").trim();
         const stFim = String(r["Status Final"] ?? "").trim();
@@ -543,21 +623,40 @@ export function mount(container) {
         const interessados = splitLines(r["Interessados"]);
         const advogados = splitLines(r["Advogados"]);
 
-        const procId = processoDest.get(proc);
+        // Âncora para página do índice
+        if (procId) content.push({ text: "", id: procId });
 
-        content.push({ text: "", id: procId });
+        // Título do processo (destaque 12), com "VINCULADO..." vermelho na mesma linha
+        content.push({
+          text: vinculado
+            ? [{ text: `${numero} `, bold: true }, { text: vinculado, color: "#B91C1C", bold: true }]
+            : numero,
+          bold: true,
+          fontSize: 12,
+          margin: [0, 0, 0, 2],
+        });
 
+        // Status final (destaque 12)
+        content.push({
+          text: stFim,
+          bold: true,
+          fontSize: 12,
+          color: statusColorHex(stFim),
+          margin: [0, 0, 0, 10],
+        });
+
+        // Conteúdo (11)
         content.push({
           stack: [
-            { text: proc, bold: true, fontSize: 12, margin: [0, 0, 0, 2] },
-            { text: stFim, bold: true, fontSize: 12, color: statusColorHex(stFim), margin: [0, 0, 0, 8] },
-
             sectionTitle("INFORMAÇÕES GERAIS"),
             keyValue("Relator", rel),
-            keyValue("Órgão", orgao),
+            keyValue("Órgão", orgao || "—"),
 
             sectionTitle("CLASSIFICAÇÃO"),
-            keyValue("Modalidade – Tipo Processo", `${modalidade}${modalidade && tipoProc ? " - " : ""}${tipoProc}` || "—"),
+            keyValue(
+              "Modalidade – Tipo Processo",
+              `${modalidade}${modalidade && tipoProc ? " - " : ""}${tipoProc}` || "—"
+            ),
 
             sectionTitle("PARTES"),
             listField("Interessados", interessados),
@@ -568,7 +667,7 @@ export function mount(container) {
             keyValue("Status Inicial → Status Final", `${stIni} → ${stFim}`),
             keyValue("Voto", voto || "—"),
           ],
-          margin: [0, 0, 0, 12],
+          margin: [0, 0, 0, 14],
           border: [true, true, true, true],
         });
       }
@@ -581,11 +680,16 @@ export function mount(container) {
         text: `Página ${currentPage} de ${pageCount}`,
         alignment: "right",
         margin: [0, 0, 40, 10],
-        fontSize: 9,
+        fontSize: 10,
         color: "#374151",
       }),
       images: { logo },
-      defaultStyle: { fontSize: 10, color: "#111827" },
+      defaultStyle: {
+        font: "Roboto",
+        fontSize: 11, // resto
+        color: "#111827",
+        lineHeight: 1.15,
+      },
       content,
     };
 
@@ -594,30 +698,38 @@ export function mount(container) {
     return filename;
   }
 
-  function summaryBox(title, entries) {
+  function summaryBox(title, entries, totalProcessos, totalMostrado) {
     const lines = entries.length ? entries.map(([k, n]) => `${k}: ${n}`).join("\n") : "—";
+    const totalLine = `Total: ${totalMostrado} (de ${totalProcessos})`;
+
     return {
       width: "*",
-      stack: [{ text: title, bold: true, margin: [0, 0, 0, 6] }, { text: lines, fontSize: 10, lineHeight: 1.2 }],
+      stack: [
+        { text: title, bold: true, fontSize: 12, margin: [0, 0, 0, 10] },
+        { text: lines, fontSize: 11, lineHeight: 1.25, margin: [0, 0, 0, 10] },
+        { text: totalLine, bold: true, fontSize: 11 },
+      ],
       border: [true, true, true, true],
-      margin: [0, 0, 0, 0],
-      padding: 8,
+      padding: 10,
     };
   }
 
   function sectionTitle(t) {
-    return { text: t, bold: true, fontSize: 9, color: "#334155", margin: [0, 6, 0, 3] };
+    return { text: t, bold: true, fontSize: 11, color: "#334155", margin: [0, 8, 0, 4] };
   }
 
   function keyValue(k, v) {
-    return { text: [{ text: `${k}: `, bold: true }, { text: String(v ?? "") || "—" }], margin: [0, 0, 0, 2] };
+    return { text: [{ text: `${k}: `, bold: true }, { text: String(v ?? "") || "—" }], margin: [0, 0, 0, 3] };
   }
 
   function listField(label, arr) {
     if (!arr || arr.length === 0) return keyValue(label, "—");
     return {
-      stack: [{ text: `${label}:`, bold: true, margin: [0, 0, 0, 2] }, ...arr.map((x) => ({ text: x, margin: [10, 0, 0, 1] }))],
-      margin: [0, 0, 0, 2],
+      stack: [
+        { text: `${label}:`, bold: true, margin: [0, 0, 0, 3] },
+        ...arr.map((x) => ({ text: x, margin: [10, 0, 0, 2] })),
+      ],
+      margin: [0, 0, 0, 3],
     };
   }
 
@@ -638,30 +750,52 @@ export function mount(container) {
     const logo = await loadLogoOnce();
     const logoBytes = dataUrlToUint8Array(logo);
 
-    const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Footer, PageNumber, ImageRun } = window.docx;
+    const {
+      Document,
+      Packer,
+      Paragraph,
+      TextRun,
+      AlignmentType,
+      HeadingLevel,
+      Footer,
+      PageNumber,
+      ImageRun,
+    } = window.docx;
 
     const sessionNumber = ordinalFeminino(sessionNumberEl.value);
     const sessionTypeHeader = mapSessionTypeToHeader(normSessionType(sessionTypeEl.value));
     const dateBR = formatDateBR(sessionDateEl.value);
 
     const { map, order } = groupByRelatorPreserveOrder(rows);
-    const pre = countByField(rows, "Status");
-    const post = countByField(rows, "Status Final");
+
+    const pre = countByFieldOrdered(rows, "Status", ORDEM_PRE);
+    const post = countByFieldOrdered(rows, "Status Final", ORDEM_POS);
+    const totalProcessos = rows.length;
+    const totalPre = sumEntries(pre);
+    const totalPos = sumEntries(post);
 
     const children = [];
 
+    // Logo
     children.push(
       new Paragraph({
         children: [new ImageRun({ data: logoBytes, transformation: { width: 110, height: 45 } })],
         alignment: AlignmentType.LEFT,
-        spacing: { after: 120 },
+        spacing: { after: 140 },
       })
     );
 
+    // Cabeçalho (12pt = size 24)
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`, bold: true, size: 24 })],
+        children: [
+          new TextRun({
+            text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`,
+            bold: true,
+            size: 24,
+          }),
+        ],
         spacing: { after: 120 },
       })
     );
@@ -678,38 +812,95 @@ export function mount(container) {
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [new TextRun({ text: `HORÁRIO: 10h`, bold: true, size: 24 })],
-        spacing: { after: 180 },
+        spacing: { after: 220 },
       })
     );
 
-    children.push(new Paragraph({ children: [new TextRun({ text: "RESUMO PRÉ-SESSÃO", bold: true })], spacing: { after: 60 } }));
+    // Resumos (títulos novos + Total)
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: "Status dos Processos – Início da Sessão", bold: true, size: 24 })],
+        spacing: { after: 110 },
+      })
+    );
     children.push(...summaryParagraphsDocx(pre));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: `Total: ${totalPre} (de ${totalProcessos})`, bold: true, size: 22 })],
+        spacing: { after: 220 },
+      })
+    );
 
-    children.push(new Paragraph({ children: [new TextRun({ text: "RESUMO PÓS-SESSÃO", bold: true })], spacing: { before: 120, after: 60 } }));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: "Status dos Processos – Final da Sessão", bold: true, size: 24 })],
+        spacing: { after: 110 },
+      })
+    );
     children.push(...summaryParagraphsDocx(post));
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: `Total: ${totalPos} (de ${totalProcessos})`, bold: true, size: 22 })],
+        spacing: { after: 260 },
+      })
+    );
 
-    children.push(new Paragraph({ children: [new TextRun({ text: "ÍNDICE (por Relator)", bold: true })], spacing: { before: 180, after: 80 } }));
+    // Índice (sem "(por Relator)")
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: "ÍNDICE", bold: true, size: 24 })],
+        spacing: { after: 140 },
+      })
+    );
 
-    for (const rel of order) {
-      children.push(new Paragraph({ children: [new TextRun({ text: `RELATOR: ${upper(rel)}`, bold: true })], spacing: { before: 80, after: 40 } }));
-
+    // Índice simples (no DOCX: sem página automática, por limitação prática do gerador no browser)
+    for (let idxRel = 0; idxRel < order.length; idxRel++) {
+      const rel = order[idxRel];
       const ps = map.get(rel) || [];
+
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: `RELATOR: ${upper(rel)}`, bold: true, size: 24 })],
+          spacing: { before: idxRel === 0 ? 0 : 240, after: 120 },
+        })
+      );
+
       for (const r of ps) {
-        const proc = String(r["Processo"] ?? "").trim();
+        const procRaw = r["Processo"];
         const orgao = String(r["Órgão"] ?? "").trim();
         const stFim = String(r["Status Final"] ?? "").trim();
-        children.push(new Paragraph({ children: [new TextRun({ text: `• ${proc} — ${stFim} — ${orgao}` })], spacing: { after: 20 } }));
+
+        const { numero, vinculado } = splitVinculado(procRaw);
+
+        const runs = vinculado
+          ? [
+              new TextRun({ text: `${numero} `, bold: true, size: 22 }),
+              new TextRun({ text: vinculado, bold: true, color: "B91C1C", size: 22 }),
+              new TextRun({ text: ` — ${stFim} — ${orgao}`, size: 22 }),
+            ]
+          : [new TextRun({ text: `${numero} — ${stFim} — ${orgao}`, size: 22 })];
+
+        children.push(
+          new Paragraph({
+            children: runs,
+            spacing: { after: 40 },
+            indent: { left: 360 },
+          })
+        );
       }
     }
 
+    // Seções por relator (nova página)
     for (const rel of order) {
       const ps = map.get(rel) || [];
 
       children.push(new Paragraph({ children: [new TextRun("")], pageBreakBefore: true }));
-      children.push(new Paragraph({ text: upper(rel), heading: HeadingLevel.HEADING_1, spacing: { after: 160 } }));
+      children.push(new Paragraph({ text: upper(rel), heading: HeadingLevel.HEADING_1, spacing: { after: 200 } }));
 
       for (const r of ps) {
-        const proc = String(r["Processo"] ?? "").trim();
+        const procRaw = r["Processo"];
+        const { numero, vinculado } = splitVinculado(procRaw);
+
         const orgao = String(r["Órgão"] ?? "").trim();
         const stIni = String(r["Status"] ?? "").trim();
         const stFim = String(r["Status Final"] ?? "").trim();
@@ -720,9 +911,28 @@ export function mount(container) {
         const interessados = splitLines(r["Interessados"]);
         const advogados = splitLines(r["Advogados"]);
 
-        children.push(new Paragraph({ children: [new TextRun({ text: proc, bold: true, size: 24 })], spacing: { after: 20 } }));
-        children.push(new Paragraph({ children: [new TextRun({ text: stFim, bold: true, size: 24, color: hexToDocxColor(statusColorHex(stFim)) })], spacing: { after: 100 } }));
+        // Título do processo (12pt)
+        children.push(
+          new Paragraph({
+            children: vinculado
+              ? [
+                  new TextRun({ text: `${numero} `, bold: true, size: 24 }),
+                  new TextRun({ text: vinculado, bold: true, color: "B91C1C", size: 24 }),
+                ]
+              : [new TextRun({ text: numero, bold: true, size: 24 })],
+            spacing: { after: 20 },
+          })
+        );
 
+        // Status final (12pt)
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: stFim, bold: true, size: 24, color: hexToDocxColor(statusColorHex(stFim)) })],
+            spacing: { after: 120 },
+          })
+        );
+
+        // Seções (11pt)
         children.push(sectionDocx("INFORMAÇÕES GERAIS"));
         children.push(kvDocx("Relator", rel));
         children.push(kvDocx("Órgão", orgao || "—"));
@@ -739,18 +949,19 @@ export function mount(container) {
         children.push(kvDocx("Status Inicial → Status Final", `${stIni} → ${stFim}`));
         children.push(kvDocx("Voto", voto || "—"));
 
-        children.push(new Paragraph({ children: [new TextRun(" ")], spacing: { after: 160 } }));
+        children.push(new Paragraph({ children: [new TextRun(" ")], spacing: { after: 220 } }));
       }
     }
 
+    // Rodapé: Página X de Y
     const footer = new Footer({
       children: [
         new Paragraph({
           alignment: AlignmentType.RIGHT,
           children: [
-            new TextRun("Página "),
+            new TextRun({ text: "Página ", size: 20 }),
             new TextRun({ children: [PageNumber.CURRENT] }),
-            new TextRun(" de "),
+            new TextRun({ text: " de ", size: 20 }),
             new TextRun({ children: [PageNumber.TOTAL_PAGES] }),
           ],
         }),
@@ -758,6 +969,14 @@ export function mount(container) {
     });
 
     const doc = new Document({
+      styles: {
+        default: {
+          document: {
+            run: { font: "Roboto", size: 22 }, // 11pt
+            paragraph: { spacing: { line: 276 } }, // ~1.15
+          },
+        },
+      },
       sections: [{ properties: {}, footers: { default: footer }, children }],
     });
 
@@ -769,22 +988,35 @@ export function mount(container) {
 
   function summaryParagraphsDocx(entries) {
     if (!entries.length) {
-      return [new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: "—" })], spacing: { after: 40 } })];
+      return [
+        new window.docx.Paragraph({
+          children: [new window.docx.TextRun({ text: "—", size: 22 })],
+          spacing: { after: 60 },
+        }),
+      ];
     }
-    return entries.map(([k, n]) => new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: `${k}: ${n}` })], spacing: { after: 40 } }));
+    return entries.map(([k, n]) =>
+      new window.docx.Paragraph({
+        children: [new window.docx.TextRun({ text: `${k}: ${n}`, size: 22 })],
+        spacing: { after: 60 },
+      })
+    );
   }
 
   function sectionDocx(title) {
     return new window.docx.Paragraph({
-      children: [new window.docx.TextRun({ text: title, bold: true, color: "334155" })],
-      spacing: { before: 120, after: 40 },
+      children: [new window.docx.TextRun({ text: title, bold: true, color: "334155", size: 22 })],
+      spacing: { before: 160, after: 60 },
     });
   }
 
   function kvDocx(k, v) {
     return new window.docx.Paragraph({
-      children: [new window.docx.TextRun({ text: `${k}: `, bold: true }), new window.docx.TextRun({ text: String(v ?? "") || "—" })],
-      spacing: { after: 20 },
+      children: [
+        new window.docx.TextRun({ text: `${k}: `, bold: true, size: 22 }),
+        new window.docx.TextRun({ text: String(v ?? "") || "—", size: 22 }),
+      ],
+      spacing: { after: 40 },
     });
   }
 
@@ -792,8 +1024,11 @@ export function mount(container) {
     if (!arr || arr.length === 0) return kvDocx(label, "—");
     const text = arr.join("\n");
     return new window.docx.Paragraph({
-      children: [new window.docx.TextRun({ text: `${label}: `, bold: true }), new window.docx.TextRun({ text })],
-      spacing: { after: 20 },
+      children: [
+        new window.docx.TextRun({ text: `${label}: `, bold: true, size: 22 }),
+        new window.docx.TextRun({ text, size: 22 }),
+      ],
+      spacing: { after: 40 },
     });
   }
 
