@@ -6,6 +6,10 @@ export function mount(container) {
   container.innerHTML = `
     <div class="card">
       <div class="card-body">
+
+        <!-- ALERTS -->
+        <div id="alertsR" class="mb-3"></div>
+
         <div class="row g-3">
           <div class="col-md-3">
             <label for="sessionNumberR" class="form-label">Nº da sessão</label>
@@ -21,8 +25,8 @@ export function mount(container) {
               <option value="2CAM">2ª Câmara</option>
             </select>
             <div class="form-text">
-              Na planilha, a coluna <strong>Tipo Sessão</strong> deve estar exatamente como
-              <code>PLENO</code>, <code>1CAM</code> ou <code>2CAM</code>.
+              Na planilha, a coluna <strong>Tipo Sessão</strong> deve estar como
+              <code>PLENO</code>, <code>1CAM</code> ou <code>2CAM</code> (o sistema tolera maiúsculas/minúsculas).
             </div>
           </div>
 
@@ -34,16 +38,26 @@ export function mount(container) {
 
         <hr class="my-3" />
 
-        <label for="fileInputR" class="form-label">Selecione o arquivo .xlsx</label>
-        <input class="form-control" type="file" id="fileInputR" accept=".xlsx" />
+        <div class="row g-3 align-items-end">
+          <div class="col-md-8">
+            <label for="fileInputR" class="form-label">Selecione o arquivo .xlsx</label>
+            <input class="form-control" type="file" id="fileInputR" accept=".xlsx" />
+            <div id="fileHintR" class="form-text">Nenhum arquivo selecionado.</div>
+          </div>
+
+          <div class="col-md-4 d-flex gap-2 justify-content-md-end">
+            <button id="btnRemoveFileR" class="btn btn-outline-secondary" type="button" disabled>
+              Remover arquivo
+            </button>
+            <button id="btnClearAllR" class="btn btn-outline-danger" type="button">
+              Limpar tudo
+            </button>
+          </div>
+        </div>
 
         <div class="d-flex flex-wrap gap-2 mt-3">
           <button id="btnPdf" class="btn btn-primary" disabled>Gerar PDF</button>
           <button id="btnDocx" class="btn btn-outline-primary" disabled>Gerar DOCX</button>
-        </div>
-
-        <div class="mt-3">
-          <div id="statusR" class="small text-muted">Nenhum arquivo selecionado.</div>
         </div>
 
         <div id="errorsR" class="mt-3"></div>
@@ -53,9 +67,15 @@ export function mount(container) {
 
   // ===== DOM =====
   const fileInput = container.querySelector("#fileInputR");
+  const fileHintEl = container.querySelector("#fileHintR");
+
   const btnPdf = container.querySelector("#btnPdf");
   const btnDocx = container.querySelector("#btnDocx");
-  const statusEl = container.querySelector("#statusR");
+
+  const btnRemoveFile = container.querySelector("#btnRemoveFileR");
+  const btnClearAll = container.querySelector("#btnClearAllR");
+
+  const alertsEl = container.querySelector("#alertsR");
   const errorsEl = container.querySelector("#errorsR");
 
   const sessionNumberEl = container.querySelector("#sessionNumberR");
@@ -93,8 +113,24 @@ export function mount(container) {
     listeners.push(() => el.removeEventListener(evt, fn));
   }
 
-  function setStatus(msg) {
-    statusEl.textContent = msg;
+  // ===== Alerts (Bootstrap) =====
+  function clearAlerts() {
+    alertsEl.innerHTML = "";
+  }
+
+  function showAlert(type, message, { dismissible = true } = {}) {
+    const t = String(type || "info"); // success | danger | warning | info
+    const msg = escapeHtml(message).replaceAll("\n", "<br/>");
+    const closeBtn = dismissible
+      ? `<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>`
+      : "";
+
+    alertsEl.innerHTML = `
+      <div class="alert alert-${t} ${dismissible ? "alert-dismissible" : ""} fade show" role="alert">
+        <div>${msg}</div>
+        ${closeBtn}
+      </div>
+    `;
   }
 
   function clearErrors() {
@@ -144,6 +180,12 @@ export function mount(container) {
     const ok = !!allRows && headerOk();
     btnPdf.disabled = !ok;
     btnDocx.disabled = !ok;
+    btnRemoveFile.disabled = !allRows; // só habilita remover se tem planilha carregada
+  }
+
+  // ===== Normalização =====
+  function normSessionType(v) {
+    return String(v ?? "").trim().toUpperCase();
   }
 
   updateButtons();
@@ -156,7 +198,6 @@ export function mount(container) {
   async function loadLogoOnce() {
     if (logoDataUrl) return logoDataUrl;
 
-    // tenta buscar do GitHub Pages (mesmo host)
     const url = new URL("./assets/logo.png", window.location.href).toString();
 
     const resp = await fetch(url, { cache: "no-store" });
@@ -176,8 +217,39 @@ export function mount(container) {
     });
   }
 
+  // ===== Helpers de reset =====
+  function clearLoadedFileState() {
+    allRows = null;
+    lastFilenameBase = null;
+    fileInput.value = "";
+    fileHintEl.textContent = "Nenhum arquivo selecionado.";
+    clearErrors();
+    updateButtons();
+  }
+
+  function clearAllFields() {
+    sessionNumberEl.value = "";
+    sessionTypeEl.value = "";
+    sessionDateEl.value = "";
+    clearLoadedFileState();
+    clearAlerts();
+  }
+
+  // ===== Botões utilidade =====
+  on(btnRemoveFile, "click", () => {
+    clearAlerts();
+    clearLoadedFileState();
+    showAlert("info", "Arquivo removido. Selecione um novo .xlsx para gerar.");
+  });
+
+  on(btnClearAll, "click", () => {
+    clearAllFields();
+    showAlert("info", "Campos limpos.");
+  });
+
   // ===== Leitura do XLSX =====
   on(fileInput, "change", async (e) => {
+    clearAlerts();
     clearErrors();
     allRows = null;
     lastFilenameBase = null;
@@ -185,33 +257,42 @@ export function mount(container) {
 
     const file = e.target.files?.[0];
     if (!file) {
-      setStatus("Nenhum arquivo selecionado.");
+      fileHintEl.textContent = "Nenhum arquivo selecionado.";
       return;
     }
     if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      setStatus("Selecione um arquivo .xlsx.");
+      fileHintEl.textContent = "Selecione um arquivo .xlsx.";
+      showAlert("danger", "Selecione um arquivo .xlsx.");
+      clearLoadedFileState();
       return;
     }
     if (!window.XLSX) {
-      setStatus("Biblioteca XLSX não carregada (CDN).");
+      fileHintEl.textContent = "Biblioteca XLSX não carregada (CDN).";
+      showAlert("danger", "Biblioteca XLSX não carregada (CDN).");
+      clearLoadedFileState();
       return;
     }
 
-    setStatus("Lendo XLSX...");
+    fileHintEl.textContent = `Arquivo selecionado: ${file.name}`;
+    showAlert("info", "Lendo XLSX...");
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = window.XLSX.read(arrayBuffer, { type: "array", cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      allRows = window.XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-      setStatus(`XLSX OK. Linhas: ${allRows.length}.`);
+      // Evita conversão automática para Date (reduz bugs de fuso/UTC)
+      const workbook = window.XLSX.read(arrayBuffer, { type: "array", cellDates: false });
+
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      // raw:true preserva melhor datas numéricas do Excel
+      allRows = window.XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+
+      showAlert("success", `XLSX OK. Linhas: ${allRows.length}.`);
       updateButtons();
     } catch (err) {
       console.error(err);
-      setStatus("Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
-      allRows = null;
-      updateButtons();
+      showAlert("danger", "Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
+      clearLoadedFileState();
     }
   });
 
@@ -226,13 +307,7 @@ export function mount(container) {
   function excelCellToYmd(value) {
     if (!value) return "";
 
-    if (value instanceof Date && !isNaN(value.getTime())) {
-      const y = value.getFullYear();
-      const m = String(value.getMonth() + 1).padStart(2, "0");
-      const d = String(value.getDate()).padStart(2, "0");
-      return `${y}-${m}-${d}`;
-    }
-
+    // 1) Número do Excel (preferencial: independe de timezone)
     if (typeof value === "number" && window.XLSX?.SSF?.parse_date_code) {
       const parsed = window.XLSX.SSF.parse_date_code(value);
       if (!parsed) return "";
@@ -242,7 +317,16 @@ export function mount(container) {
       return `${y}-${m}-${d}`;
     }
 
+    // 2) Date (se vier como Date, usa UTC pra não “voltar um dia” por fuso)
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      const y = value.getUTCFullYear();
+      const m = String(value.getUTCMonth() + 1).padStart(2, "0");
+      const d = String(value.getUTCDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
     const s = String(value).trim();
+
     const m1 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     if (m1) return `${m1[3]}-${m1[2]}-${m1[1]}`;
 
@@ -267,11 +351,11 @@ export function mount(container) {
       return { ok: false, rows: [], message: "Preencha Nº da sessão, Tipo de sessão e Data." };
     }
 
-    const typeCode = sessionTypeEl.value;        // PLENO/1CAM/2CAM (literal)
-    const ymd = sessionDateEl.value;             // YYYY-MM-DD
+    const typeCode = normSessionType(sessionTypeEl.value); // normalizado
+    const ymd = sessionDateEl.value;                        // YYYY-MM-DD
 
     const filtered = allRows.filter((r) => {
-      const tipo = r["Tipo Sessão"];
+      const tipo = normSessionType(r["Tipo Sessão"]);
       const dataYmd = excelCellToYmd(r["Data"]);
       return tipo === typeCode && dataYmd === ymd;
     });
@@ -283,7 +367,7 @@ export function mount(container) {
         rows: [],
         message:
           `Não foram encontradas sessões para o dia ${dateBR}.\n` +
-          `Verifique o preenchimento da planilha: na coluna "Tipo Sessão" deve estar preenchido "${typeCode}" corretamente (ex.: 1CAM), ` +
+          `Verifique o preenchimento da planilha: na coluna "Tipo Sessão" deve estar preenchido "${typeCode}" (ex.: 1CAM), ` +
           `e a coluna "Data" deve corresponder à data da sessão.`,
       };
     }
@@ -331,10 +415,10 @@ export function mount(container) {
 
   // ===== Cores =====
   function statusColorHex(statusFinal) {
-    if (statusFinal === "Julgado") return "#1B5E20"; // verde escuro
-    if (statusFinal === "Adiado" || statusFinal === "Pedido de Vista") return "#8A6D00"; // mostarda escuro
-    if (statusFinal === "Sobrestado") return "#4A148C"; // roxo escuro
-    if (statusFinal === "Retirado de Pauta") return "#7F1D1D"; // bordô
+    if (statusFinal === "Julgado") return "#1B5E20";
+    if (statusFinal === "Adiado" || statusFinal === "Pedido de Vista") return "#8A6D00";
+    if (statusFinal === "Sobrestado") return "#4A148C";
+    if (statusFinal === "Retirado de Pauta") return "#7F1D1D";
     return "#111827";
   }
 
@@ -373,7 +457,7 @@ export function mount(container) {
     const logo = await loadLogoOnce();
 
     const sessionNumber = ordinalFeminino(sessionNumberEl.value);
-    const sessionTypeHeader = mapSessionTypeToHeader(sessionTypeEl.value);
+    const sessionTypeHeader = mapSessionTypeToHeader(normSessionType(sessionTypeEl.value));
     const dateBR = formatDateBR(sessionDateEl.value);
 
     const { map, order } = groupByRelatorPreserveOrder(rows);
@@ -395,15 +479,8 @@ export function mount(container) {
 
     const content = [];
 
-    // Logo (1ª página)
-    content.push({
-      image: "logo",
-      width: 70,
-      alignment: "left",
-      margin: [0, 0, 0, 8],
-    });
+    content.push({ image: "logo", width: 70, alignment: "left", margin: [0, 0, 0, 8] });
 
-    // Cabeçalho (igual pauta manual)
     content.push({
       text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`,
       alignment: "center",
@@ -426,14 +503,12 @@ export function mount(container) {
       margin: [0, 0, 0, 14],
     });
 
-    // Resumos
     content.push({
       columns: [summaryBox("Resumo pré-sessão", pre), summaryBox("Resumo pós-sessão", post)],
       columnGap: 12,
       margin: [0, 0, 0, 14],
     });
 
-    // Índice
     content.push({ text: "ÍNDICE (por Relator)", bold: true, fontSize: 12, margin: [0, 0, 0, 8] });
 
     for (const rel of order) {
@@ -470,7 +545,6 @@ export function mount(container) {
       }
     }
 
-    // Seções por relator
     for (const rel of order) {
       const ps = map.get(rel) || [];
       const relId = relatorDest.get(rel);
@@ -506,10 +580,7 @@ export function mount(container) {
             keyValue("Órgão", orgao),
 
             sectionTitle("CLASSIFICAÇÃO"),
-            keyValue(
-              "Modalidade – Tipo Processo",
-              `${modalidade}${modalidade && tipoProc ? " - " : ""}${tipoProc}` || "—"
-            ),
+            keyValue("Modalidade – Tipo Processo", `${modalidade}${modalidade && tipoProc ? " - " : ""}${tipoProc}` || "—"),
 
             sectionTitle("PARTES"),
             listField("Interessados", interessados),
@@ -568,7 +639,10 @@ export function mount(container) {
   function listField(label, arr) {
     if (!arr || arr.length === 0) return keyValue(label, "—");
     return {
-      stack: [{ text: `${label}:`, bold: true, margin: [0, 0, 0, 2] }, ...arr.map((x) => ({ text: x, margin: [10, 0, 0, 1] }))],
+      stack: [
+        { text: `${label}:`, bold: true, margin: [0, 0, 0, 2] },
+        ...arr.map((x) => ({ text: x, margin: [10, 0, 0, 1] })),
+      ],
       margin: [0, 0, 0, 2],
     };
   }
@@ -604,7 +678,7 @@ export function mount(container) {
     } = window.docx;
 
     const sessionNumber = ordinalFeminino(sessionNumberEl.value);
-    const sessionTypeHeader = mapSessionTypeToHeader(sessionTypeEl.value);
+    const sessionTypeHeader = mapSessionTypeToHeader(normSessionType(sessionTypeEl.value));
     const dateBR = formatDateBR(sessionDateEl.value);
 
     const { map, order } = groupByRelatorPreserveOrder(rows);
@@ -613,7 +687,6 @@ export function mount(container) {
 
     const children = [];
 
-    // Logo (1ª página)
     children.push(
       new Paragraph({
         children: [new ImageRun({ data: logoBytes, transformation: { width: 110, height: 45 } })],
@@ -622,11 +695,16 @@ export function mount(container) {
       })
     );
 
-    // Cabeçalho (igual pauta manual)
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`, bold: true, size: 24 })],
+        children: [
+          new TextRun({
+            text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`,
+            bold: true,
+            size: 24,
+          }),
+        ],
         spacing: { after: 120 },
       })
     );
@@ -647,14 +725,12 @@ export function mount(container) {
       })
     );
 
-    // Resumos
     children.push(new Paragraph({ children: [new TextRun({ text: "RESUMO PRÉ-SESSÃO", bold: true })], spacing: { after: 60 } }));
     children.push(...summaryParagraphsDocx(pre));
 
     children.push(new Paragraph({ children: [new TextRun({ text: "RESUMO PÓS-SESSÃO", bold: true })], spacing: { before: 120, after: 60 } }));
     children.push(...summaryParagraphsDocx(post));
 
-    // Índice simples (sem links internos no DOCX, por compatibilidade)
     children.push(new Paragraph({ children: [new TextRun({ text: "ÍNDICE (por Relator)", bold: true })], spacing: { before: 180, after: 80 } }));
 
     for (const rel of order) {
@@ -669,7 +745,6 @@ export function mount(container) {
       }
     }
 
-    // Seções por relator (nova página)
     for (const rel of order) {
       const ps = map.get(rel) || [];
 
@@ -688,11 +763,9 @@ export function mount(container) {
         const interessados = splitLines(r["Interessados"]);
         const advogados = splitLines(r["Advogados"]);
 
-        // Topo
         children.push(new Paragraph({ children: [new TextRun({ text: proc, bold: true, size: 24 })], spacing: { after: 20 } }));
         children.push(new Paragraph({ children: [new TextRun({ text: stFim, bold: true, size: 24, color: hexToDocxColor(statusColorHex(stFim)) })], spacing: { after: 100 } }));
 
-        // Seções
         children.push(sectionDocx("INFORMAÇÕES GERAIS"));
         children.push(kvDocx("Relator", rel));
         children.push(kvDocx("Órgão", orgao || "—"));
@@ -713,7 +786,6 @@ export function mount(container) {
       }
     }
 
-    // Rodapé: Página X de Y
     const footer = new Footer({
       children: [
         new Paragraph({
@@ -742,7 +814,9 @@ export function mount(container) {
     if (!entries.length) {
       return [new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: "—" })], spacing: { after: 40 } })];
     }
-    return entries.map(([k, n]) => new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: `${k}: ${n}` })], spacing: { after: 40 } }));
+    return entries.map(([k, n]) =>
+      new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: `${k}: ${n}` })], spacing: { after: 40 } })
+    );
   }
 
   function sectionDocx(title) {
@@ -761,7 +835,6 @@ export function mount(container) {
 
   function listDocx(label, arr) {
     if (!arr || arr.length === 0) return kvDocx(label, "—");
-    // Mantém visual mais limpo no DOCX (linhas separadas)
     const text = arr.join("\n");
     return new window.docx.Paragraph({
       children: [new window.docx.TextRun({ text: `${label}: `, bold: true }), new window.docx.TextRun({ text })],
@@ -781,40 +854,44 @@ export function mount(container) {
     return bytes;
   }
 
-  // ===== Botões =====
+  // ===== Botões Gerar =====
   on(btnPdf, "click", async () => {
+    clearAlerts();
     clearErrors();
+
     const res = validateAndGetSessionRows();
     if (!res.ok) {
-      setStatus(res.message || "Não foi possível gerar.");
+      showAlert("danger", res.message || "Não foi possível gerar.");
       return;
     }
 
-    setStatus("Gerando PDF...");
+    showAlert("info", "Gerando PDF...", { dismissible: false });
     try {
       const filename = await generatePdf(res.rows);
-      setStatus(`PDF gerado: ${filename}`);
+      showAlert("success", `PDF gerado: ${filename}`);
     } catch (err) {
       console.error(err);
-      setStatus("Erro ao gerar PDF. Abra o Console (F12) e veja o erro.");
+      showAlert("danger", "Erro ao gerar PDF. Abra o Console (F12) e veja o erro.");
     }
   });
 
   on(btnDocx, "click", async () => {
+    clearAlerts();
     clearErrors();
+
     const res = validateAndGetSessionRows();
     if (!res.ok) {
-      setStatus(res.message || "Não foi possível gerar.");
+      showAlert("danger", res.message || "Não foi possível gerar.");
       return;
     }
 
-    setStatus("Gerando DOCX...");
+    showAlert("info", "Gerando DOCX...", { dismissible: false });
     try {
       const filename = await generateDocx(res.rows);
-      setStatus(`DOCX gerado: ${filename}`);
+      showAlert("success", `DOCX gerado: ${filename}`);
     } catch (err) {
       console.error(err);
-      setStatus("Erro ao gerar DOCX. Abra o Console (F12) e veja o erro.");
+      showAlert("danger", "Erro ao gerar DOCX. Abra o Console (F12) e veja o erro.");
     }
   });
 
