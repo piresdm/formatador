@@ -7,9 +7,6 @@ export function mount(container) {
     <div class="card">
       <div class="card-body">
 
-        <!-- ALERTS -->
-        <div id="alertsR" class="mb-3"></div>
-
         <div class="row g-3">
           <div class="col-md-3">
             <label for="sessionNumberR" class="form-label">Nº da sessão</label>
@@ -24,10 +21,6 @@ export function mount(container) {
               <option value="1CAM">1ª Câmara</option>
               <option value="2CAM">2ª Câmara</option>
             </select>
-            <div class="form-text">
-              Na planilha, a coluna <strong>Tipo Sessão</strong> deve estar como
-              <code>PLENO</code>, <code>1CAM</code> ou <code>2CAM</code> (o sistema tolera maiúsculas/minúsculas).
-            </div>
           </div>
 
           <div class="col-md-4">
@@ -38,29 +31,33 @@ export function mount(container) {
 
         <hr class="my-3" />
 
-        <div class="row g-3 align-items-end">
-          <div class="col-md-8">
+        <div class="row g-3">
+          <div class="col-12">
             <label for="fileInputR" class="form-label">Selecione o arquivo .xlsx</label>
-            <input class="form-control" type="file" id="fileInputR" accept=".xlsx" />
-            <div id="fileHintR" class="form-text">Nenhum arquivo selecionado.</div>
-          </div>
 
-          <div class="col-md-4 d-flex gap-2 justify-content-md-end">
-            <button id="btnRemoveFileR" class="btn btn-outline-secondary" type="button" disabled>
-              Remover arquivo
-            </button>
-            <button id="btnClearAllR" class="btn btn-outline-danger" type="button">
-              Limpar tudo
-            </button>
+            <!-- Wrapper para colocar o "X" dentro do input -->
+            <div class="position-relative">
+              <input class="form-control pe-5" type="file" id="fileInputR" accept=".xlsx" />
+              <button
+                id="btnClearFileX"
+                type="button"
+                class="btn-close position-absolute top-50 end-0 translate-middle-y me-2 d-none"
+                aria-label="Remover arquivo"
+                title="Remover arquivo"
+              ></button>
+            </div>
+
+            <div class="form-text" id="fileHintR">Nenhum arquivo selecionado.</div>
           </div>
         </div>
 
-        <div class="d-flex flex-wrap gap-2 mt-3">
+        <div class="d-flex flex-wrap gap-2 mt-3 align-items-center">
+          <button id="btnClearAllR" class="btn btn-outline-secondary" type="button">Limpar</button>
+
           <button id="btnPdf" class="btn btn-primary" disabled>Gerar PDF</button>
           <button id="btnDocx" class="btn btn-outline-primary" disabled>Gerar DOCX</button>
         </div>
 
-        <div id="errorsR" class="mt-3"></div>
       </div>
     </div>
   `;
@@ -68,24 +65,20 @@ export function mount(container) {
   // ===== DOM =====
   const fileInput = container.querySelector("#fileInputR");
   const fileHintEl = container.querySelector("#fileHintR");
+  const btnClearFileX = container.querySelector("#btnClearFileX");
 
   const btnPdf = container.querySelector("#btnPdf");
   const btnDocx = container.querySelector("#btnDocx");
-
-  const btnRemoveFile = container.querySelector("#btnRemoveFileR");
   const btnClearAll = container.querySelector("#btnClearAllR");
-
-  const alertsEl = container.querySelector("#alertsR");
-  const errorsEl = container.querySelector("#errorsR");
 
   const sessionNumberEl = container.querySelector("#sessionNumberR");
   const sessionTypeEl = container.querySelector("#sessionTypeR");
   const sessionDateEl = container.querySelector("#sessionDateR");
 
   // ===== Estado =====
-  let allRows = null;              // cache da planilha (não precisa reenviar)
+  let allRows = null;
   let lastFilenameBase = null;
-  let logoDataUrl = null;          // carregada de /assets/logo.png
+  let logoDataUrl = null;
 
   // ===== Validação =====
   const STATUS_INICIAIS = new Set([
@@ -113,59 +106,10 @@ export function mount(container) {
     listeners.push(() => el.removeEventListener(evt, fn));
   }
 
-  // ===== Alerts (Bootstrap) =====
-  function clearAlerts() {
-    alertsEl.innerHTML = "";
-  }
-
-  function showAlert(type, message, { dismissible = true } = {}) {
-    const t = String(type || "info"); // success | danger | warning | info
-    const msg = escapeHtml(message).replaceAll("\n", "<br/>");
-    const closeBtn = dismissible
-      ? `<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>`
-      : "";
-
-    alertsEl.innerHTML = `
-      <div class="alert alert-${t} ${dismissible ? "alert-dismissible" : ""} fade show" role="alert">
-        <div>${msg}</div>
-        ${closeBtn}
-      </div>
-    `;
-  }
-
-  function clearErrors() {
-    errorsEl.innerHTML = "";
-  }
-
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function showErrorsGrouped(groups) {
-    const blocks = groups
-      .filter((g) => g.items.length > 0)
-      .map((g) => {
-        const lis = g.items
-          .map((it) => {
-            const det = it.detalhe ? ` — <span class="text-muted">${escapeHtml(it.detalhe)}</span>` : "";
-            return `<li><code>${escapeHtml(it.processo)}</code> — ${escapeHtml(it.relator2)} — ${escapeHtml(it.orgao)}${det}</li>`;
-          })
-          .join("");
-        return `
-          <div class="alert alert-danger">
-            <div><strong>${escapeHtml(g.title)}</strong></div>
-            <ul class="mb-0 mt-2">${lis}</ul>
-          </div>
-        `;
-      })
-      .join("");
-
-    errorsEl.innerHTML = blocks || "";
+  // ===== UX helpers =====
+  function userAlert(msg) {
+    // Popup simples com OK (sem cara de programador)
+    window.alert(String(msg || ""));
   }
 
   function headerOk() {
@@ -176,19 +120,25 @@ export function mount(container) {
     );
   }
 
-  function updateButtons() {
-    const ok = !!allRows && headerOk();
-    btnPdf.disabled = !ok;
-    btnDocx.disabled = !ok;
-    btnRemoveFile.disabled = !allRows; // só habilita remover se tem planilha carregada
-  }
-
-  // ===== Normalização =====
   function normSessionType(v) {
     return String(v ?? "").trim().toUpperCase();
   }
 
-  updateButtons();
+  function setFileHint(text) {
+    fileHintEl.textContent = text;
+  }
+
+  function setClearXVisible(visible) {
+    btnClearFileX.classList.toggle("d-none", !visible);
+  }
+
+  function updateButtons() {
+    const ok = !!allRows && headerOk();
+    btnPdf.disabled = !ok;
+    btnDocx.disabled = !ok;
+    setClearXVisible(!!allRows || !!fileInput.files?.[0]);
+  }
+
   [sessionNumberEl, sessionTypeEl, sessionDateEl].forEach((el) => {
     on(el, "input", updateButtons);
     on(el, "change", updateButtons);
@@ -199,9 +149,12 @@ export function mount(container) {
     if (logoDataUrl) return logoDataUrl;
 
     const url = new URL("./assets/logo.png", window.location.href).toString();
-
     const resp = await fetch(url, { cache: "no-store" });
-    if (!resp.ok) throw new Error(`Logo não encontrada em assets/logo.png (HTTP ${resp.status})`);
+
+    if (!resp.ok) {
+      // Mensagem para usuário (sem detalhes técnicos)
+      throw new Error("Não foi possível carregar a imagem do cabeçalho (logo).");
+    }
 
     const blob = await resp.blob();
     logoDataUrl = await blobToDataURL(blob);
@@ -217,86 +170,86 @@ export function mount(container) {
     });
   }
 
-  // ===== Helpers de reset =====
-  function clearLoadedFileState() {
+  // ===== Reset =====
+  function clearLoadedFileState({ silent = false } = {}) {
     allRows = null;
     lastFilenameBase = null;
+
+    // limpar o input file
     fileInput.value = "";
-    fileHintEl.textContent = "Nenhum arquivo selecionado.";
-    clearErrors();
+    setFileHint("Nenhum arquivo selecionado.");
+    setClearXVisible(false);
     updateButtons();
+
+    if (!silent) userAlert("Arquivo removido.");
   }
 
   function clearAllFields() {
     sessionNumberEl.value = "";
     sessionTypeEl.value = "";
     sessionDateEl.value = "";
-    clearLoadedFileState();
-    clearAlerts();
+    clearLoadedFileState({ silent: true });
+    updateButtons();
+    userAlert("Campos limpos.");
   }
 
-  // ===== Botões utilidade =====
-  on(btnRemoveFile, "click", () => {
-    clearAlerts();
-    clearLoadedFileState();
-    showAlert("info", "Arquivo removido. Selecione um novo .xlsx para gerar.");
-  });
+  // X dentro do input
+  on(btnClearFileX, "click", () => clearLoadedFileState());
 
-  on(btnClearAll, "click", () => {
-    clearAllFields();
-    showAlert("info", "Campos limpos.");
-  });
+  // Limpar tudo (discreto ao lado de Gerar)
+  on(btnClearAll, "click", clearAllFields);
 
   // ===== Leitura do XLSX =====
   on(fileInput, "change", async (e) => {
-    clearAlerts();
-    clearErrors();
     allRows = null;
     lastFilenameBase = null;
     updateButtons();
 
     const file = e.target.files?.[0];
+
     if (!file) {
-      fileHintEl.textContent = "Nenhum arquivo selecionado.";
-      return;
-    }
-    if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      fileHintEl.textContent = "Selecione um arquivo .xlsx.";
-      showAlert("danger", "Selecione um arquivo .xlsx.");
-      clearLoadedFileState();
-      return;
-    }
-    if (!window.XLSX) {
-      fileHintEl.textContent = "Biblioteca XLSX não carregada (CDN).";
-      showAlert("danger", "Biblioteca XLSX não carregada (CDN).");
-      clearLoadedFileState();
+      setFileHint("Nenhum arquivo selecionado.");
+      setClearXVisible(false);
+      updateButtons();
       return;
     }
 
-    fileHintEl.textContent = `Arquivo selecionado: ${file.name}`;
-    showAlert("info", "Lendo XLSX...");
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setFileHint("Selecione um arquivo .xlsx.");
+      userAlert("Selecione um arquivo .xlsx.");
+      clearLoadedFileState({ silent: true });
+      return;
+    }
+
+    if (!window.XLSX) {
+      userAlert("Não foi possível ler a planilha. Tente recarregar a página.");
+      clearLoadedFileState({ silent: true });
+      return;
+    }
+
+    setFileHint(`Arquivo selecionado: ${file.name}`);
+    setClearXVisible(true);
 
     try {
       const arrayBuffer = await file.arrayBuffer();
 
-      // Evita conversão automática para Date (reduz bugs de fuso/UTC)
+      // Evita conversão automática para Date (reduz bug de fuso/UTC)
       const workbook = window.XLSX.read(arrayBuffer, { type: "array", cellDates: false });
-
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-      // raw:true preserva melhor datas numéricas do Excel
+      // raw:true preserva datas numéricas do Excel
       allRows = window.XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
 
-      showAlert("success", `XLSX OK. Linhas: ${allRows.length}.`);
+      userAlert(`Planilha carregada com sucesso. Linhas: ${allRows.length}.`);
       updateButtons();
     } catch (err) {
       console.error(err);
-      showAlert("danger", "Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
-      clearLoadedFileState();
+      userAlert("Não foi possível ler a planilha. Verifique se o arquivo está correto e tente novamente.");
+      clearLoadedFileState({ silent: true });
     }
   });
 
-  // ===== Regras de sessão =====
+  // ===== Sessão =====
   function mapSessionTypeToHeader(typeCode) {
     if (typeCode === "PLENO") return "PLENO";
     if (typeCode === "1CAM") return "PRIMEIRA CÂMARA";
@@ -307,7 +260,7 @@ export function mount(container) {
   function excelCellToYmd(value) {
     if (!value) return "";
 
-    // 1) Número do Excel (preferencial: independe de timezone)
+    // Número do Excel (ideal)
     if (typeof value === "number" && window.XLSX?.SSF?.parse_date_code) {
       const parsed = window.XLSX.SSF.parse_date_code(value);
       if (!parsed) return "";
@@ -317,7 +270,7 @@ export function mount(container) {
       return `${y}-${m}-${d}`;
     }
 
-    // 2) Date (se vier como Date, usa UTC pra não “voltar um dia” por fuso)
+    // Se vier como Date, usa UTC para não “voltar um dia”
     if (value instanceof Date && !isNaN(value.getTime())) {
       const y = value.getUTCFullYear();
       const m = String(value.getUTCMonth() + 1).padStart(2, "0");
@@ -326,7 +279,6 @@ export function mount(container) {
     }
 
     const s = String(value).trim();
-
     const m1 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     if (m1) return `${m1[3]}-${m1[2]}-${m1[1]}`;
 
@@ -341,9 +293,39 @@ export function mount(container) {
     return parts.slice(0, 2).join(" ");
   }
 
-  function validateAndGetSessionRows() {
-    clearErrors();
+  function buildValidationAlertText(groups, maxItemsTotal = 20) {
+    const lines = [];
+    let shown = 0;
+    let total = 0;
 
+    for (const g of groups) total += g.items.length;
+
+    lines.push(`Foram encontrados erros na planilha (${total}).`);
+    lines.push("Ajuste e gere novamente.");
+
+    for (const g of groups) {
+      if (!g.items.length) continue;
+      lines.push("");
+      lines.push(`${g.title}:`);
+
+      for (const it of g.items) {
+        if (shown >= maxItemsTotal) break;
+        const det = it.detalhe ? ` (${it.detalhe})` : "";
+        lines.push(`- ${it.processo} — ${it.relator2} — ${it.orgao}${det}`);
+        shown++;
+      }
+      if (shown >= maxItemsTotal) break;
+    }
+
+    if (total > shown) {
+      lines.push("");
+      lines.push(`(Mostrando ${shown} de ${total} erros)`);
+    }
+
+    return lines.join("\n");
+  }
+
+  function validateAndGetSessionRows() {
     if (!allRows) {
       return { ok: false, rows: [], message: "Carregue a planilha primeiro." };
     }
@@ -351,8 +333,8 @@ export function mount(container) {
       return { ok: false, rows: [], message: "Preencha Nº da sessão, Tipo de sessão e Data." };
     }
 
-    const typeCode = normSessionType(sessionTypeEl.value); // normalizado
-    const ymd = sessionDateEl.value;                        // YYYY-MM-DD
+    const typeCode = normSessionType(sessionTypeEl.value);
+    const ymd = sessionDateEl.value;
 
     const filtered = allRows.filter((r) => {
       const tipo = normSessionType(r["Tipo Sessão"]);
@@ -367,8 +349,7 @@ export function mount(container) {
         rows: [],
         message:
           `Não foram encontradas sessões para o dia ${dateBR}.\n` +
-          `Verifique o preenchimento da planilha: na coluna "Tipo Sessão" deve estar preenchido "${typeCode}" (ex.: 1CAM), ` +
-          `e a coluna "Data" deve corresponder à data da sessão.`,
+          `Confira se a coluna "Tipo Sessão" está como ${typeCode} e se a coluna "Data" é a data da sessão.`,
       };
     }
 
@@ -391,25 +372,27 @@ export function mount(container) {
       if (!stFim) {
         groups[0].items.push({ processo, relator2: rel2, orgao });
       } else if (!STATUS_FINAIS.has(stFim)) {
-        groups[1].items.push({ processo, relator2: rel2, orgao, detalhe: `Valor encontrado: "${stFim}"` });
+        groups[1].items.push({ processo, relator2: rel2, orgao, detalhe: `Valor: "${stFim}"` });
       }
 
       if (!stIni) {
         groups[2].items.push({ processo, relator2: rel2, orgao });
       } else if (!STATUS_INICIAIS.has(stIni)) {
-        groups[3].items.push({ processo, relator2: rel2, orgao, detalhe: `Valor encontrado: "${stIni}"` });
+        groups[3].items.push({ processo, relator2: rel2, orgao, detalhe: `Valor: "${stIni}"` });
       }
     }
 
     const hasErrors = groups.some((g) => g.items.length > 0);
     if (hasErrors) {
-      showErrorsGrouped(groups);
-      return { ok: false, rows: [], message: "Foram encontrados erros na planilha. Corrija e gere novamente." };
+      return {
+        ok: false,
+        rows: [],
+        message: buildValidationAlertText(groups),
+      };
     }
 
     const dateBR = formatDateBR(ymd);
     lastFilenameBase = `relatorio_pauta_${typeCode}_${dateBR.replaceAll("/", "-")}`;
-
     return { ok: true, rows: filtered, message: "" };
   }
 
@@ -422,7 +405,7 @@ export function mount(container) {
     return "#111827";
   }
 
-  // ===== Agrupamento por relator (ordem da planilha) =====
+  // ===== Agrupamento por relator =====
   function groupByRelatorPreserveOrder(rows) {
     const map = new Map();
     const order = [];
@@ -452,7 +435,7 @@ export function mount(container) {
 
   // ===== PDF =====
   async function generatePdf(rows) {
-    if (!window.pdfMake) throw new Error("Biblioteca pdfmake não carregada (CDN).");
+    if (!window.pdfMake) throw new Error("PDF indisponível no momento.");
 
     const logo = await loadLogoOnce();
 
@@ -639,10 +622,7 @@ export function mount(container) {
   function listField(label, arr) {
     if (!arr || arr.length === 0) return keyValue(label, "—");
     return {
-      stack: [
-        { text: `${label}:`, bold: true, margin: [0, 0, 0, 2] },
-        ...arr.map((x) => ({ text: x, margin: [10, 0, 0, 1] })),
-      ],
+      stack: [{ text: `${label}:`, bold: true, margin: [0, 0, 0, 2] }, ...arr.map((x) => ({ text: x, margin: [10, 0, 0, 1] }))],
       margin: [0, 0, 0, 2],
     };
   }
@@ -659,23 +639,12 @@ export function mount(container) {
 
   // ===== DOCX =====
   async function generateDocx(rows) {
-    if (!window.docx) throw new Error("Biblioteca docx não carregada (CDN).");
-    if (!window.saveAs) throw new Error("Biblioteca FileSaver não carregada (CDN).");
+    if (!window.docx || !window.saveAs) throw new Error("DOCX indisponível no momento.");
 
     const logo = await loadLogoOnce();
     const logoBytes = dataUrlToUint8Array(logo);
 
-    const {
-      Document,
-      Packer,
-      Paragraph,
-      TextRun,
-      AlignmentType,
-      HeadingLevel,
-      Footer,
-      PageNumber,
-      ImageRun,
-    } = window.docx;
+    const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Footer, PageNumber, ImageRun } = window.docx;
 
     const sessionNumber = ordinalFeminino(sessionNumberEl.value);
     const sessionTypeHeader = mapSessionTypeToHeader(normSessionType(sessionTypeEl.value));
@@ -698,13 +667,7 @@ export function mount(container) {
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({
-            text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`,
-            bold: true,
-            size: 24,
-          }),
-        ],
+        children: [new TextRun({ text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`, bold: true, size: 24 })],
         spacing: { after: 120 },
       })
     );
@@ -814,9 +777,7 @@ export function mount(container) {
     if (!entries.length) {
       return [new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: "—" })], spacing: { after: 40 } })];
     }
-    return entries.map(([k, n]) =>
-      new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: `${k}: ${n}` })], spacing: { after: 40 } })
-    );
+    return entries.map(([k, n]) => new window.docx.Paragraph({ children: [new window.docx.TextRun({ text: `${k}: ${n}` })], spacing: { after: 40 } }));
   }
 
   function sectionDocx(title) {
@@ -856,44 +817,41 @@ export function mount(container) {
 
   // ===== Botões Gerar =====
   on(btnPdf, "click", async () => {
-    clearAlerts();
-    clearErrors();
-
     const res = validateAndGetSessionRows();
     if (!res.ok) {
-      showAlert("danger", res.message || "Não foi possível gerar.");
+      userAlert(res.message || "Não foi possível gerar.");
       return;
     }
 
-    showAlert("info", "Gerando PDF...", { dismissible: false });
+    userAlert("Gerando PDF...");
     try {
       const filename = await generatePdf(res.rows);
-      showAlert("success", `PDF gerado: ${filename}`);
+      userAlert(`PDF gerado: ${filename}`);
     } catch (err) {
       console.error(err);
-      showAlert("danger", "Erro ao gerar PDF. Abra o Console (F12) e veja o erro.");
+      userAlert("Não foi possível gerar o PDF. Tente novamente.");
     }
   });
 
   on(btnDocx, "click", async () => {
-    clearAlerts();
-    clearErrors();
-
     const res = validateAndGetSessionRows();
     if (!res.ok) {
-      showAlert("danger", res.message || "Não foi possível gerar.");
+      userAlert(res.message || "Não foi possível gerar.");
       return;
     }
 
-    showAlert("info", "Gerando DOCX...", { dismissible: false });
+    userAlert("Gerando DOCX...");
     try {
       const filename = await generateDocx(res.rows);
-      showAlert("success", `DOCX gerado: ${filename}`);
+      userAlert(`DOCX gerado: ${filename}`);
     } catch (err) {
       console.error(err);
-      showAlert("danger", "Erro ao gerar DOCX. Abra o Console (F12) e veja o erro.");
+      userAlert("Não foi possível gerar o DOCX. Tente novamente.");
     }
   });
+
+  // init
+  updateButtons();
 
   return {
     destroy() {
