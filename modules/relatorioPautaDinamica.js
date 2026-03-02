@@ -206,7 +206,7 @@ export function mount(container) {
     return { numero, vinculado };
   }
 
-  // Chave estável para id/página do pdf (mesma regra no índice e no corpo)
+  // Chave estável para id/página do pdf
   function processKey(procRaw) {
     return normalizeProcText(procRaw).replaceAll("⚠️", "").trim();
   }
@@ -225,6 +225,17 @@ export function mount(container) {
     const key = processKey(procRaw);
     if (!key) return "";
     return `P_${hashId(rel + "|" + key)}`;
+  }
+
+  // Âncora que gera uma linha real (necessário para pageReference)
+  function anchor(id) {
+    return {
+      text: " ",            // NÃO pode ser vazio
+      id,
+      fontSize: 1,
+      lineHeight: 1,
+      margin: [0, 0, 0, 0],
+    };
   }
 
   // ===== Reset =====
@@ -280,12 +291,8 @@ export function mount(container) {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-
-      // evita conversão automática para Date
       const workbook = window.XLSX.read(arrayBuffer, { type: "array", cellDates: false });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-
-      // raw:true preserva datas numéricas do Excel
       allRows = window.XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
 
       setHint(`Planilha carregada. Linhas: ${allRows.length}.`);
@@ -492,10 +499,8 @@ export function mount(container) {
 
     const content = [];
 
-    // Logo
     content.push({ image: "logo", width: 70, alignment: "left", margin: [0, 0, 0, 10] });
 
-    // Cabeçalho
     content.push({
       text: `PAUTA DA ${sessionNumber} SESSÃO ORDINÁRIA DO ${sessionTypeHeader}`,
       alignment: "center",
@@ -518,7 +523,6 @@ export function mount(container) {
       margin: [0, 0, 0, 18],
     });
 
-    // Resumos
     content.push({
       columns: [
         summaryBox("Status dos Processos – Início da Sessão", pre, totalProcessos, totalPre),
@@ -528,10 +532,9 @@ export function mount(container) {
       margin: [0, 0, 0, 26],
     });
 
-    // Índice
     content.push({ text: "ÍNDICE", bold: true, fontSize: 12, margin: [0, 0, 0, 12] });
 
-    // Índice: relator + itens com página (pageReference) — SEM LINKS
+    // Índice com pageReference (destinos agora apontam para âncoras reais)
     for (let idxRel = 0; idxRel < order.length; idxRel++) {
       const rel = order[idxRel];
       const ps = map.get(rel) || [];
@@ -551,7 +554,7 @@ export function mount(container) {
         const stFim = String(r["Status Final"] ?? "").trim();
 
         const { numero, vinculado } = splitVinculado(procRaw);
-        const dest = processId(rel, procRaw); // <-- determinístico, sempre bate com o corpo
+        const dest = processId(rel, procRaw);
 
         const leftText = vinculado
           ? [
@@ -563,16 +566,11 @@ export function mount(container) {
 
         content.push({
           columns: [
-            {
-              width: "*",
-              text: leftText,
-              fontSize: 11,
-              margin: [12, 0, 10, 3],
-            },
+            { width: "*", text: leftText, fontSize: 11, margin: [12, 0, 10, 3] },
             {
               width: 55,
               alignment: "right",
-              text: dest ? [{ text: "p. " }, { text: "", pageReference: dest }] : "—",
+              text: [{ text: "p. " }, { text: "", pageReference: dest }],
               fontSize: 11,
               margin: [0, 0, 0, 3],
             },
@@ -581,7 +579,7 @@ export function mount(container) {
       }
     }
 
-    // Corpo: seções por relator (nova página)
+    // Corpo
     for (const rel of order) {
       const ps = map.get(rel) || [];
 
@@ -593,7 +591,7 @@ export function mount(container) {
         const { numero, vinculado } = splitVinculado(procRaw);
 
         const procId = processId(rel, procRaw);
-        content.push({ text: "", id: procId }); // <-- SEMPRE existe para pageReference
+        content.push(anchor(procId)); // <-- FIX: agora existe linha real
 
         const orgao = String(r["Órgão"] ?? "").trim();
         const stIni = String(r["Status"] ?? "").trim();
@@ -668,7 +666,6 @@ export function mount(container) {
 
     const filename = `${lastFilenameBase || "relatorio_pauta"}.pdf`;
 
-    // IMPORTANTe: aguarda o render e só então salva (evita "sucesso" falso)
     await new Promise((resolve, reject) => {
       try {
         window.pdfMake.createPdf(docDefinition).getBlob((blob) => {
@@ -787,7 +784,6 @@ export function mount(container) {
 
     children.push(new Paragraph({ children: [new TextRun({ text: "ÍNDICE", bold: true, size: 24 })], spacing: { after: 140 } }));
 
-    // DOCX: índice sem página por item (limitação prática no browser)
     for (let idxRel = 0; idxRel < order.length; idxRel++) {
       const rel = order[idxRel];
       const ps = map.get(rel) || [];
@@ -981,7 +977,6 @@ export function mount(container) {
     }
   });
 
-  // init
   updateButtons();
 
   return {
