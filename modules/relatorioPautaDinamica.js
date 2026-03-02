@@ -31,23 +31,30 @@ export function mount(container) {
 
         <hr class="my-3" />
 
-        <div class="row g-3">
+        <div class="row g-3 align-items-end">
           <div class="col-12">
             <label for="fileInputR" class="form-label">Selecione o arquivo .xlsx</label>
 
-            <!-- Wrapper para colocar o "X" dentro do input -->
-            <div class="position-relative">
-              <input class="form-control pe-5" type="file" id="fileInputR" accept=".xlsx" />
-              <button
-                id="btnClearFileX"
-                type="button"
-                class="btn-close position-absolute top-50 end-0 translate-middle-y me-2 d-none"
-                aria-label="Remover arquivo"
-                title="Remover arquivo"
-              ></button>
+            <!-- X à esquerda + input menor ao lado -->
+            <div class="row g-2 align-items-center">
+              <div class="col-auto">
+                <button
+                  id="btnClearFileX"
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  style="width: 40px; height: 38px; padding: 0;"
+                  title="Remover arquivo"
+                  aria-label="Remover arquivo"
+                  disabled
+                >×</button>
+              </div>
+
+              <div class="col-12 col-md-8 col-lg-7">
+                <input class="form-control" type="file" id="fileInputR" accept=".xlsx" />
+              </div>
             </div>
 
-            <div class="form-text" id="fileHintR">Nenhum arquivo selecionado.</div>
+            <div class="form-text mt-2" id="fileHintR">Nenhum arquivo selecionado.</div>
           </div>
         </div>
 
@@ -108,8 +115,13 @@ export function mount(container) {
 
   // ===== UX helpers =====
   function userAlert(msg) {
-    // Popup simples com OK (sem cara de programador)
+    // Popup com OK: só para erro/sucesso
     window.alert(String(msg || ""));
+  }
+
+  function setHint(msg) {
+    // Mensagens neutras/discretas
+    fileHintEl.textContent = String(msg || "");
   }
 
   function headerOk() {
@@ -124,19 +136,11 @@ export function mount(container) {
     return String(v ?? "").trim().toUpperCase();
   }
 
-  function setFileHint(text) {
-    fileHintEl.textContent = text;
-  }
-
-  function setClearXVisible(visible) {
-    btnClearFileX.classList.toggle("d-none", !visible);
-  }
-
   function updateButtons() {
     const ok = !!allRows && headerOk();
     btnPdf.disabled = !ok;
     btnDocx.disabled = !ok;
-    setClearXVisible(!!allRows || !!fileInput.files?.[0]);
+    btnClearFileX.disabled = !allRows && !(fileInput.files?.[0]);
   }
 
   [sessionNumberEl, sessionTypeEl, sessionDateEl].forEach((el) => {
@@ -152,8 +156,7 @@ export function mount(container) {
     const resp = await fetch(url, { cache: "no-store" });
 
     if (!resp.ok) {
-      // Mensagem para usuário (sem detalhes técnicos)
-      throw new Error("Não foi possível carregar a imagem do cabeçalho (logo).");
+      throw new Error("Não foi possível carregar a logo do documento.");
     }
 
     const blob = await resp.blob();
@@ -171,32 +174,27 @@ export function mount(container) {
   }
 
   // ===== Reset =====
-  function clearLoadedFileState({ silent = false } = {}) {
+  function clearLoadedFileState() {
     allRows = null;
     lastFilenameBase = null;
-
-    // limpar o input file
     fileInput.value = "";
-    setFileHint("Nenhum arquivo selecionado.");
-    setClearXVisible(false);
+    setHint("Nenhum arquivo selecionado.");
     updateButtons();
-
-    if (!silent) userAlert("Arquivo removido.");
   }
 
   function clearAllFields() {
     sessionNumberEl.value = "";
     sessionTypeEl.value = "";
     sessionDateEl.value = "";
-    clearLoadedFileState({ silent: true });
+    clearLoadedFileState();
     updateButtons();
-    userAlert("Campos limpos.");
+    // Sem popup aqui (você não pediu confirmação)
   }
 
-  // X dentro do input
-  on(btnClearFileX, "click", () => clearLoadedFileState());
+  // X: remove sem mensagem
+  on(btnClearFileX, "click", clearLoadedFileState);
 
-  // Limpar tudo (discreto ao lado de Gerar)
+  // Limpar tudo: sem mensagem
   on(btnClearAll, "click", clearAllFields);
 
   // ===== Leitura do XLSX =====
@@ -208,27 +206,27 @@ export function mount(container) {
     const file = e.target.files?.[0];
 
     if (!file) {
-      setFileHint("Nenhum arquivo selecionado.");
-      setClearXVisible(false);
+      setHint("Nenhum arquivo selecionado.");
       updateButtons();
       return;
     }
 
     if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      setFileHint("Selecione um arquivo .xlsx.");
+      setHint("Nenhum arquivo selecionado.");
       userAlert("Selecione um arquivo .xlsx.");
-      clearLoadedFileState({ silent: true });
+      clearLoadedFileState();
       return;
     }
 
     if (!window.XLSX) {
-      userAlert("Não foi possível ler a planilha. Tente recarregar a página.");
-      clearLoadedFileState({ silent: true });
+      setHint("Nenhum arquivo selecionado.");
+      userAlert("Não foi possível ler a planilha. Recarregue a página e tente novamente.");
+      clearLoadedFileState();
       return;
     }
 
-    setFileHint(`Arquivo selecionado: ${file.name}`);
-    setClearXVisible(true);
+    setHint(`Arquivo selecionado: ${file.name}`);
+    updateButtons();
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -240,12 +238,12 @@ export function mount(container) {
       // raw:true preserva datas numéricas do Excel
       allRows = window.XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
 
-      userAlert(`Planilha carregada com sucesso. Linhas: ${allRows.length}.`);
+      setHint(`Planilha carregada. Linhas: ${allRows.length}.`);
       updateButtons();
     } catch (err) {
       console.error(err);
-      userAlert("Não foi possível ler a planilha. Verifique se o arquivo está correto e tente novamente.");
-      clearLoadedFileState({ silent: true });
+      userAlert("Não foi possível ler a planilha. Verifique o arquivo e tente novamente.");
+      clearLoadedFileState();
     }
   });
 
@@ -301,7 +299,7 @@ export function mount(container) {
     for (const g of groups) total += g.items.length;
 
     lines.push(`Foram encontrados erros na planilha (${total}).`);
-    lines.push("Ajuste e gere novamente.");
+    lines.push("Corrija e tente gerar novamente.");
 
     for (const g of groups) {
       if (!g.items.length) continue;
@@ -384,11 +382,7 @@ export function mount(container) {
 
     const hasErrors = groups.some((g) => g.items.length > 0);
     if (hasErrors) {
-      return {
-        ok: false,
-        rows: [],
-        message: buildValidationAlertText(groups),
-      };
+      return { ok: false, rows: [], message: buildValidationAlertText(groups) };
     }
 
     const dateBR = formatDateBR(ymd);
@@ -435,7 +429,7 @@ export function mount(container) {
 
   // ===== PDF =====
   async function generatePdf(rows) {
-    if (!window.pdfMake) throw new Error("PDF indisponível no momento.");
+    if (!window.pdfMake) throw new Error("Não foi possível gerar o PDF no momento.");
 
     const logo = await loadLogoOnce();
 
@@ -639,7 +633,7 @@ export function mount(container) {
 
   // ===== DOCX =====
   async function generateDocx(rows) {
-    if (!window.docx || !window.saveAs) throw new Error("DOCX indisponível no momento.");
+    if (!window.docx || !window.saveAs) throw new Error("Não foi possível gerar o DOCX no momento.");
 
     const logo = await loadLogoOnce();
     const logoBytes = dataUrlToUint8Array(logo);
@@ -823,10 +817,9 @@ export function mount(container) {
       return;
     }
 
-    userAlert("Gerando PDF...");
     try {
       const filename = await generatePdf(res.rows);
-      userAlert(`PDF gerado: ${filename}`);
+      userAlert(`PDF gerado com sucesso: ${filename}`);
     } catch (err) {
       console.error(err);
       userAlert("Não foi possível gerar o PDF. Tente novamente.");
@@ -840,10 +833,9 @@ export function mount(container) {
       return;
     }
 
-    userAlert("Gerando DOCX...");
     try {
       const filename = await generateDocx(res.rows);
-      userAlert(`DOCX gerado: ${filename}`);
+      userAlert(`DOCX gerado com sucesso: ${filename}`);
     } catch (err) {
       console.error(err);
       userAlert("Não foi possível gerar o DOCX. Tente novamente.");
