@@ -8,7 +8,7 @@ export function mount(container) {
       <div class="card-body">
         <p class="mb-3">
           Envie os dois HTMLs da pauta (Página da Sessão e Imprimir Relação)
-          para gerar a planilha consolidada com as informações dos processos em pauta na sessão.
+          para gerar a planilha consolidada com as informações dos processos em pauta na sessão (pós-sessão).
           </br></br>
           Para gerar o HTML 1 (Página da Sessão): </br></br>
           1 - Vá no Processo Eletrônico, menu Julgamento Colegiado - Sessões Plenárias - Plenário Presencial
@@ -100,6 +100,7 @@ export function mount(container) {
       ws["!cols"] = [
         { wch: 48 },
         { wch: 24 },
+        { wch: 24 },
         { wch: 26 },
         { wch: 36 },
         { wch: 18 },
@@ -114,7 +115,7 @@ export function mount(container) {
 
       XLSX.utils.book_append_sheet(wb, ws, "Extração Pauta");
       const base = safeFilename((fileDoc1.name || "extracao-pauta").replace(/\.html?$/i, ""));
-      XLSX.writeFile(wb, `${base}_extracao_pre_sessao.xlsx`);
+      XLSX.writeFile(wb, `${base}_extracao_pos_sessao.xlsx`);
 
       setStatus(
         `Planilha gerada com ${resultado.incluidos} processos. ` +
@@ -148,6 +149,13 @@ function limparTexto(texto) {
 
 function removerParenteses(texto) {
   return String(texto || "").replace(/[()]/g, "").trim();
+}
+
+function removerConteudoEntreParenteses(texto) {
+  return String(texto || "")
+    .replace(/\s*\([^)]*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizarProcesso(valor) {
@@ -273,6 +281,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
   const cabecalho = [
     "Processo",
     "Status",
+    "Status Final",
     "Relator",
     "Órgão",
     "Modalidade",
@@ -299,6 +308,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
     processo: -1,
     tipoInclusao: -1,
     relator: -1,
+    situacao: -1,
   };
 
   headerCells.forEach((cell, i) => {
@@ -310,6 +320,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
     if (h === "processo") idx.processo = i;
     if (h.includes("tipo de inclusao")) idx.tipoInclusao = i;
     if (h === "relator") idx.relator = i;
+    if (h === "situacao") idx.situacao = i;
   });
 
   linhas.forEach((tr) => {
@@ -339,6 +350,8 @@ function extrairLinhasDoc1(html, processosDoc2) {
       : processoNumero;
 
     const statusFinal = mapearStatus(tipoInclusao);
+    const idxSituacao = idx.situacao >= 0 ? idx.situacao : 8;
+    const situacaoFinal = removerConteudoEntreParenteses(tds[idxSituacao]?.textContent || "");
     const rowIndex = aoa.length + 1;
 
     if (statusFinal && statusFinal !== "Pauta") {
@@ -348,6 +361,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
     aoa.push([
       processoFinal,
       statusFinal,
+      situacaoFinal,
       limparTexto(tds[idx.relator]?.textContent || ""),
       limparTexto(tds[idx.unidade]?.textContent || ""),
       limparTexto(tds[idx.modalidade]?.textContent || ""),
