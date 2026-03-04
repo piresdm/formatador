@@ -168,6 +168,24 @@ function mapearStatus(tipoInclusao) {
   return "";
 }
 
+function deduplicarLinhas(valores) {
+  const vistos = new Set();
+  const unicos = [];
+
+  valores.forEach((valor) => {
+    const texto = limparTexto(valor);
+    if (!texto) return;
+
+    const chave = texto.toLocaleLowerCase("pt-BR");
+    if (vistos.has(chave)) return;
+
+    vistos.add(chave);
+    unicos.push(texto);
+  });
+
+  return unicos;
+}
+
 function mapearVoto(celulaVoto) {
   const texto = limparTexto(celulaVoto?.textContent || "");
   if (/nao disponibilizado|não disponibilizado/i.test(texto)) return "Indisponível";
@@ -206,8 +224,8 @@ function extrairProcessosDoc2(html) {
 
       if (/\badv\.?\b/i.test(linhaLimpa)) {
         const advogadoLimpo = removerParenteses(linhaLimpa)
-          .replace(/\badv\.?\b\s*:?/gi, "")
-          .replace(/^[-:;,]+\s*/, "")
+          .replace(/^adv\.?\s*:?\s*/i, "")
+          .replace(/^[-:;,.]+\s*/, "")
           .trim();
         if (advogadoLimpo) advogados.push(advogadoLimpo);
         return;
@@ -217,8 +235,8 @@ function extrairProcessosDoc2(html) {
     });
 
     processos.set(processo, {
-      interessados: interessados.join("\n"),
-      advogados: advogados.join("\n"),
+      interessados: deduplicarLinhas(interessados).join("\n"),
+      advogados: deduplicarLinhas(advogados).join("\n"),
     });
   });
 
