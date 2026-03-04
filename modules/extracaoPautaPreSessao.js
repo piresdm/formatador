@@ -206,8 +206,8 @@ function extrairProcessosDoc2(html) {
 
       if (/\badv\.?\b/i.test(linhaLimpa)) {
         const advogadoLimpo = removerParenteses(linhaLimpa)
-          .replace(/\badv\.?\b\s*:?/gi, "")
-          .replace(/^[-:;,]+\s*/, "")
+          .replace(/^adv\.?\s*:?\s*/i, "")
+          .replace(/^[-:;,.]+\s*/, "")
           .trim();
         if (advogadoLimpo) advogados.push(advogadoLimpo);
         return;
