@@ -41,6 +41,12 @@ async function loadAndMount(type) {
       return;
     }
 
+    if (type === "EXTRACAO_PAUTA_POS_SESSAO") {
+      const mod = await import("./modules/extracaoPautaPosSessao.js");
+      currentModule = mod.mount(container);
+      return;
+    }
+
     showMessage(`<div class="text-danger small">Tipo de documento inválido.</div>`);
   } catch (err) {
     console.error("Falha ao carregar módulo:", err);
@@ -55,6 +61,7 @@ async function loadAndMount(type) {
             <li><code>./modules/pautaManual.js</code></li>
             <li><code>./modules/relatorioPautaDinamica.js</code></li>
             <li><code>./modules/extracaoPautaPreSessao.js</code></li>
+            <li><code>./modules/extracaoPautaPosSessao.js</code></li>
           </ul>
           Erro: <code>${String(err?.message || err)}</code>
         </div>
