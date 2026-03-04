@@ -86,10 +86,7 @@ export function mount(container) {
     try {
       setStatus("Lendo HTMLs...");
 
-      const [html1, html2] = await Promise.all([
-        fileDoc1.text(),
-        fileDoc2.text(),
-      ]);
+      const [html1, html2] = await Promise.all([fileDoc1.text(), fileDoc2.text()]);
       const processosDoc2 = extrairProcessosDoc2(html2);
       const resultado = extrairLinhasDoc1(html1, processosDoc2);
 
@@ -112,9 +109,7 @@ export function mount(container) {
       aplicarEstilos(ws, resultado);
 
       XLSX.utils.book_append_sheet(wb, ws, "Extração Pauta");
-      const base = safeFilename(
-        (fileDoc1.name || "extracao-pauta").replace(/\.html?$/i, ""),
-      );
+      const base = safeFilename((fileDoc1.name || "extracao-pauta").replace(/\.html?$/i, ""));
       XLSX.writeFile(wb, `${base}_extracao_pre_sessao.xlsx`);
 
       setStatus(
@@ -144,9 +139,11 @@ function normalizarCabecalho(texto) {
 }
 
 function limparTexto(texto) {
-  return String(texto || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return String(texto || "").replace(/\s+/g, " ").trim();
+}
+
+function removerParenteses(texto) {
+  return String(texto || "").replace(/[()]/g, "").trim();
 }
 
 function normalizarProcesso(valor) {
@@ -173,8 +170,7 @@ function mapearStatus(tipoInclusao) {
 
 function mapearVoto(celulaVoto) {
   const texto = limparTexto(celulaVoto?.textContent || "");
-  if (/nao disponibilizado|não disponibilizado/i.test(texto))
-    return "Indisponível";
+  if (/nao disponibilizado|não disponibilizado/i.test(texto)) return "Indisponível";
   if (celulaVoto?.querySelector("button")) return "Listado";
   return "";
 }
@@ -205,11 +201,19 @@ function extrairProcessosDoc2(html) {
     const advogados = [];
 
     linhasCol2.slice(1).forEach((linha) => {
-      if (/^adv\./i.test(linha)) {
-        advogados.push(linha.replace(/^adv\.\s*/i, "").trim());
+      const linhaLimpa = limparTexto(linha);
+      if (!linhaLimpa) return;
+
+      if (/\badv\.?\b/i.test(linhaLimpa)) {
+        const advogadoLimpo = removerParenteses(linhaLimpa)
+          .replace(/\badv\.?\b\s*:?/gi, "")
+          .replace(/^[-:;,]+\s*/, "")
+          .trim();
+        if (advogadoLimpo) advogados.push(advogadoLimpo);
         return;
       }
-      interessados.push(linha);
+
+      interessados.push(removerParenteses(linhaLimpa));
     });
 
     processos.set(processo, {
@@ -228,10 +232,7 @@ function localizarTabelaRelacao(doc) {
       .slice(0, 12)
       .map((cell) => normalizarCabecalho(cell.textContent));
 
-    if (
-      headers.some((h) => h.includes("processo")) &&
-      headers.some((h) => h.includes("tipo de inclusao"))
-    ) {
+    if (headers.some((h) => h.includes("processo")) && headers.some((h) => h.includes("tipo de inclusao"))) {
       return tabela;
     }
   }
@@ -262,7 +263,6 @@ function extrairLinhasDoc1(html, processosDoc2) {
 
   const aoa = [cabecalho];
   const statusNaoPautaRows = [];
-  const processoComVinculadoRows = [];
   let adiados = 0;
   let incluidos = 0;
 
@@ -304,21 +304,16 @@ function extrairLinhasDoc1(html, processosDoc2) {
     const processoTexto = limparTexto(tds[idx.processo]?.textContent || "");
     if (!processoTexto) return;
 
-    const vinculadoMatch = processoTexto.match(
-      /(VINCULADO AO CONSELHEIRO\s+.+)$/i,
-    );
+    const vinculadoMatch = processoTexto.match(/\(?\s*(VINCULADO AO CONSELHEIRO\s+.+?)\s*\)?$/i);
     const processoNumero = vinculadoMatch
       ? limparTexto(processoTexto.replace(vinculadoMatch[0], ""))
       : processoTexto;
 
     const processoKey = normalizarProcesso(processoNumero);
-    const detalhes = processosDoc2.get(processoKey) || {
-      interessados: "",
-      advogados: "",
-    };
+    const detalhes = processosDoc2.get(processoKey) || { interessados: "", advogados: "" };
 
     const processoFinal = vinculadoMatch
-      ? `${processoNumero}\n⚠️ ${vinculadoMatch[1]}`
+      ? `${processoNumero}\n⚠️ ${removerParenteses(vinculadoMatch[1])}`
       : processoNumero;
 
     const statusFinal = mapearStatus(tipoInclusao);
@@ -326,9 +321,6 @@ function extrairLinhasDoc1(html, processosDoc2) {
 
     if (statusFinal && statusFinal !== "Pauta") {
       statusNaoPautaRows.push(rowIndex);
-    }
-    if (vinculadoMatch) {
-      processoComVinculadoRows.push(rowIndex);
     }
 
     aoa.push([
@@ -347,13 +339,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
     incluidos += 1;
   });
 
-  return {
-    aoa,
-    adiados,
-    incluidos,
-    statusNaoPautaRows,
-    processoComVinculadoRows,
-  };
+  return { aoa, adiados, incluidos, statusNaoPautaRows };
 }
 
 function aplicarEstilos(ws, resultado) {
@@ -382,13 +368,4 @@ function aplicarEstilos(ws, resultado) {
     };
   });
 
-  resultado.processoComVinculadoRows.forEach((excelRow) => {
-    const procCell = ws[`A${excelRow}`];
-    if (!procCell) return;
-    procCell.s = {
-      ...(procCell.s || {}),
-      font: { name: "Calibri", sz: 11, color: { rgb: "FFFF0000" } },
-      alignment: { vertical: "top", wrapText: true },
-    };
-  });
 }
