@@ -2,8 +2,16 @@ import { clearElement } from "./shared/helpers.js";
 
 const docTypeEl = document.getElementById("docType");
 const container = document.getElementById("moduleContainer");
+const extracaoInfoAlertEl = document.getElementById("extracaoInfoAlert");
 
 let currentModule = null;
+
+function toggleExtracaoInfoAlert(type) {
+  if (!extracaoInfoAlertEl) return;
+
+  const shouldHideAlert = ["RELATORIO_PAUTA_DINAMICA", "PAUTA_MANUAL"].includes(type);
+  extracaoInfoAlertEl.classList.toggle("d-none", shouldHideAlert);
+}
 
 function showMessage(html) {
   container.innerHTML = html;
@@ -70,4 +78,10 @@ async function loadAndMount(type) {
   }
 }
 
-docTypeEl.addEventListener("change", (e) => loadAndMount(e.target.value));
+docTypeEl.addEventListener("change", (e) => {
+  const { value } = e.target;
+  toggleExtracaoInfoAlert(value);
+  loadAndMount(value);
+});
+
+toggleExtracaoInfoAlert(docTypeEl.value);
