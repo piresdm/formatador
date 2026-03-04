@@ -7,18 +7,30 @@ export function mount(container) {
     <div class="card">
       <div class="card-body">
         <p class="mb-3">
-          Envie os dois HTMLs da pauta (Relação de Julgamento e detalhamento por relator)
-          para gerar uma planilha consolidada (processamento 100% no navegador, sem backend).
+          Envie os dois HTMLs da pauta (Página da Sessão e Página Imprimir Relação)
+          para gerar a planilha consolidada com as informações dos processos em pauta na sessão.
+          </br></br>
+          Para gerar o HTML 1: </br></br>
+          1 - Vá no Processo Eletrônico, menu Julgamento Colegiado - Sessões Plenárias - Plenário Presencial
+          e selecione a sessão desejada.</br>
+          2 - Entre na aba Relação de Julgamento </br>
+          3 - Aperte Ctrl+S, selecione o tipo "Página da web, completa(*.htm;*html)" e salve o arquivo
+         </br></br>
+          Para gerar o HTML 2:</br></br>
+          1 - Após salvar o HTML1, vá no final da página onde você está, clique no botão "Imprimir Relação" </br>
+          2 - Na janela que abre, selecione HTML </br>
+          3 - Vai abrir uma nova página e você deve salvá-la também através do Ctrl+S </br>
+        </br>
         </p>
 
         <div class="row g-3">
           <div class="col-md-6">
-            <label for="htmlDoc1" class="form-label">HTML 1 - Relação de Julgamento</label>
+            <label for="htmlDoc1" class="form-label">HTML 1 - Página da Sessão</label>
             <input id="htmlDoc1" class="form-control" type="file" accept=".html,text/html" />
           </div>
 
           <div class="col-md-6">
-            <label for="htmlDoc2" class="form-label">HTML 2 - Blocos por relator</label>
+            <label for="htmlDoc2" class="form-label">HTML 2 - Imprimir Relação</label>
             <input id="htmlDoc2" class="form-control" type="file" accept=".html,text/html" />
           </div>
         </div>
@@ -74,7 +86,10 @@ export function mount(container) {
     try {
       setStatus("Lendo HTMLs...");
 
-      const [html1, html2] = await Promise.all([fileDoc1.text(), fileDoc2.text()]);
+      const [html1, html2] = await Promise.all([
+        fileDoc1.text(),
+        fileDoc2.text(),
+      ]);
       const processosDoc2 = extrairProcessosDoc2(html2);
       const resultado = extrairLinhasDoc1(html1, processosDoc2);
 
@@ -97,7 +112,9 @@ export function mount(container) {
       aplicarEstilos(ws, resultado);
 
       XLSX.utils.book_append_sheet(wb, ws, "Extração Pauta");
-      const base = safeFilename((fileDoc1.name || "extracao-pauta").replace(/\.html?$/i, ""));
+      const base = safeFilename(
+        (fileDoc1.name || "extracao-pauta").replace(/\.html?$/i, ""),
+      );
       XLSX.writeFile(wb, `${base}_extracao_pre_sessao.xlsx`);
 
       setStatus(
@@ -127,7 +144,9 @@ function normalizarCabecalho(texto) {
 }
 
 function limparTexto(texto) {
-  return String(texto || "").replace(/\s+/g, " ").trim();
+  return String(texto || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizarProcesso(valor) {
@@ -154,7 +173,8 @@ function mapearStatus(tipoInclusao) {
 
 function mapearVoto(celulaVoto) {
   const texto = limparTexto(celulaVoto?.textContent || "");
-  if (/nao disponibilizado|não disponibilizado/i.test(texto)) return "Indisponível";
+  if (/nao disponibilizado|não disponibilizado/i.test(texto))
+    return "Indisponível";
   if (celulaVoto?.querySelector("button")) return "Listado";
   return "";
 }
@@ -208,7 +228,10 @@ function localizarTabelaRelacao(doc) {
       .slice(0, 12)
       .map((cell) => normalizarCabecalho(cell.textContent));
 
-    if (headers.some((h) => h.includes("processo")) && headers.some((h) => h.includes("tipo de inclusao"))) {
+    if (
+      headers.some((h) => h.includes("processo")) &&
+      headers.some((h) => h.includes("tipo de inclusao"))
+    ) {
       return tabela;
     }
   }
@@ -221,7 +244,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
   const tabela = localizarTabelaRelacao(doc);
 
   if (!tabela) {
-    throw new Error('Tabela "Relação de Julgamento" não encontrada no HTML 1.');
+    throw new Error('Tabela "Página da Sessão" não encontrada no HTML 1.');
   }
 
   const cabecalho = [
@@ -281,13 +304,18 @@ function extrairLinhasDoc1(html, processosDoc2) {
     const processoTexto = limparTexto(tds[idx.processo]?.textContent || "");
     if (!processoTexto) return;
 
-    const vinculadoMatch = processoTexto.match(/(VINCULADO AO CONSELHEIRO\s+.+)$/i);
+    const vinculadoMatch = processoTexto.match(
+      /(VINCULADO AO CONSELHEIRO\s+.+)$/i,
+    );
     const processoNumero = vinculadoMatch
       ? limparTexto(processoTexto.replace(vinculadoMatch[0], ""))
       : processoTexto;
 
     const processoKey = normalizarProcesso(processoNumero);
-    const detalhes = processosDoc2.get(processoKey) || { interessados: "", advogados: "" };
+    const detalhes = processosDoc2.get(processoKey) || {
+      interessados: "",
+      advogados: "",
+    };
 
     const processoFinal = vinculadoMatch
       ? `${processoNumero}\n⚠️ ${vinculadoMatch[1]}`
@@ -319,7 +347,13 @@ function extrairLinhasDoc1(html, processosDoc2) {
     incluidos += 1;
   });
 
-  return { aoa, adiados, incluidos, statusNaoPautaRows, processoComVinculadoRows };
+  return {
+    aoa,
+    adiados,
+    incluidos,
+    statusNaoPautaRows,
+    processoComVinculadoRows,
+  };
 }
 
 function aplicarEstilos(ws, resultado) {
