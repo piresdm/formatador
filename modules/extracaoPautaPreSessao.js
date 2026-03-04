@@ -204,10 +204,9 @@ function extrairProcessosDoc2(html) {
       const linhaLimpa = limparTexto(linha);
       if (!linhaLimpa) return;
 
-      if (/\badv\.?\b/i.test(linhaLimpa)) {
+      if (/^[-–—:;\s]*adv\.?/i.test(linhaLimpa)) {
         const advogadoLimpo = removerParenteses(linhaLimpa)
-          .replace(/\badv\.?\b\s*:?/gi, "")
-          .replace(/^[-:;,]+\s*/, "")
+          .replace(/^[-–—:;\s]*adv\.?\s*[:;-]?\s*/i, "")
           .trim();
         if (advogadoLimpo) advogados.push(advogadoLimpo);
         return;
@@ -304,7 +303,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
     const processoTexto = limparTexto(tds[idx.processo]?.textContent || "");
     if (!processoTexto) return;
 
-    const vinculadoMatch = processoTexto.match(/\(?\s*(VINCULADO AO CONSELHEIRO\s+.+?)\s*\)?$/i);
+    const vinculadoMatch = processoTexto.match(/\(?\s*(VINCULADO AO\s+.+?)\s*\)?$/i);
     const processoNumero = vinculadoMatch
       ? limparTexto(processoTexto.replace(vinculadoMatch[0], ""))
       : processoTexto;
