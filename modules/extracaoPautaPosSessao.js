@@ -23,6 +23,10 @@ export function mount(container) {
         </br>
         </p>
 
+        <div class="alert alert-info mb-3" role="alert">
+          A diferença entre a extração pré-sessão e a pós-sessão é que a planilha pós-sessão inclui a coluna “Status Final”, que apresenta o status do processo ao término da sessão.
+        </div>
+
         <div class="row g-3">
           <div class="col-md-6">
             <label for="htmlDoc1" class="form-label">HTML 1 - Página da Sessão</label>
