@@ -7,16 +7,16 @@ export function mount(container) {
     <div class="card">
       <div class="card-body">
         <p class="mb-3">
-          Envie os dois HTMLs da pauta (Página da Sessão e Página Imprimir Relação)
+          Envie os dois HTMLs da pauta (Página da Sessão e Imprimir Relação)
           para gerar a planilha consolidada com as informações dos processos em pauta na sessão.
           </br></br>
-          Para gerar o HTML 1: </br></br>
+          Para gerar o HTML 1 (Página da Sessão): </br></br>
           1 - Vá no Processo Eletrônico, menu Julgamento Colegiado - Sessões Plenárias - Plenário Presencial
           e selecione a sessão desejada.</br>
           2 - Entre na aba Relação de Julgamento </br>
           3 - Aperte Ctrl+S, selecione o tipo "Página da web, completa(*.htm;*html)" e salve o arquivo
          </br></br>
-          Para gerar o HTML 2:</br></br>
+          Para gerar o HTML 2 (Imprimir Relação):</br></br>
           1 - Após salvar o HTML1, vá no final da página onde você está, clique no botão "Imprimir Relação" </br>
           2 - Na janela que abre, selecione HTML </br>
           3 - Vai abrir uma nova página e você deve salvá-la também através do Ctrl+S </br>
