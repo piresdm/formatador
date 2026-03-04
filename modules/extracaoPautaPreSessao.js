@@ -7,18 +7,30 @@ export function mount(container) {
     <div class="card">
       <div class="card-body">
         <p class="mb-3">
-          Envie os dois HTMLs da pauta (Relação de Julgamento e detalhamento por relator)
-          para gerar uma planilha consolidada (processamento 100% no navegador, sem backend).
+          Envie os dois HTMLs da pauta (Página da Sessão e Imprimir Relação)
+          para gerar a planilha consolidada com as informações dos processos em pauta na sessão.
+          </br></br>
+          Para gerar o HTML 1 (Página da Sessão): </br></br>
+          1 - Vá no Processo Eletrônico, menu Julgamento Colegiado - Sessões Plenárias - Plenário Presencial
+          e selecione a sessão desejada.</br>
+          2 - Entre na aba Relação de Julgamento </br>
+          3 - Aperte Ctrl+S, selecione o tipo "Página da web, completa(*.htm;*html)" e salve o arquivo
+         </br></br>
+          Para gerar o HTML 2 (Imprimir Relação):</br></br>
+          1 - Após salvar o HTML1, vá no final da página onde você está, clique no botão "Imprimir Relação" </br>
+          2 - Na janela que abre, selecione HTML </br>
+          3 - Vai abrir uma nova página e você deve salvá-la também através do Ctrl+S </br>
+        </br>
         </p>
 
         <div class="row g-3">
           <div class="col-md-6">
-            <label for="htmlDoc1" class="form-label">HTML 1 - Relação de Julgamento</label>
+            <label for="htmlDoc1" class="form-label">HTML 1 - Página da Sessão</label>
             <input id="htmlDoc1" class="form-control" type="file" accept=".html,text/html" />
           </div>
 
           <div class="col-md-6">
-            <label for="htmlDoc2" class="form-label">HTML 2 - Blocos por relator</label>
+            <label for="htmlDoc2" class="form-label">HTML 2 - Imprimir Relação</label>
             <input id="htmlDoc2" class="form-control" type="file" accept=".html,text/html" />
           </div>
         </div>
@@ -232,7 +244,7 @@ function extrairLinhasDoc1(html, processosDoc2) {
   const tabela = localizarTabelaRelacao(doc);
 
   if (!tabela) {
-    throw new Error('Tabela "Relação de Julgamento" não encontrada no HTML 1.');
+    throw new Error('Tabela "Página da Sessão" não encontrada no HTML 1.');
   }
 
   const cabecalho = [
