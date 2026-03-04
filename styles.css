@@ -14,3 +14,8 @@ button:disabled {
 .module-card {
   margin-top: 12px;
 }
+
+select,
+input {
+  margin-top: 6px;
+}
