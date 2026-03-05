@@ -10,7 +10,8 @@ Aplicação **100% front-end** para formatação de documentos e extração de p
 ## Módulos
 - Relatório Pauta Dinâmica
 - Pauta Manual
-- Extração Pauta (pré sessão)
+- Extração Pauta (pré-sessão)
+- Extração Pauta (pós-sessão)
 
 ## Como usar
 1. Abra `index.html` no navegador (ou via qualquer servidor estático de sua preferência).
