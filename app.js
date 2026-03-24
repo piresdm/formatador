@@ -9,7 +9,7 @@ let currentModule = null;
 function toggleExtracaoInfoAlert(type) {
   if (!extracaoInfoAlertEl) return;
 
-  const shouldHideAlert = ["RELATORIO_PAUTA_DINAMICA", "PAUTA_MANUAL"].includes(type);
+  const shouldHideAlert = ["LINKS", "RELATORIO_PAUTA_DINAMICA", "PAUTA_MANUAL"].includes(type);
   extracaoInfoAlertEl.classList.toggle("d-none", shouldHideAlert);
 }
 
@@ -31,6 +31,12 @@ async function loadAndMount(type) {
   if (!type) return;
 
   try {
+    if (type === "LINKS") {
+      const mod = await import("./modules/links.js");
+      currentModule = mod.mount(container);
+      return;
+    }
+
     if (type === "PAUTA_MANUAL") {
       const mod = await import("./modules/pautaManual.js");
       currentModule = mod.mount(container);
@@ -66,6 +72,7 @@ async function loadAndMount(type) {
         <div class="small mt-2">
           Verifique se os arquivos existem exatamente nesses caminhos (com mesma maiúscula/minúscula):
           <ul class="mb-2">
+            <li><code>./modules/links.js</code></li>
             <li><code>./modules/pautaManual.js</code></li>
             <li><code>./modules/relatorioPautaDinamica.js</code></li>
             <li><code>./modules/extracaoPautaPreSessao.js</code></li>
