@@ -1,4 +1,5 @@
 import { clearElement } from "./shared/helpers.js";
+import { MODULES, MODULES_BY_TYPE } from "./modules/registry.js";
 
 const docTypeEl = document.getElementById("docType");
 const container = document.getElementById("moduleContainer");
@@ -6,10 +7,20 @@ const extracaoInfoAlertEl = document.getElementById("extracaoInfoAlert");
 
 let currentModule = null;
 
+function renderModuleOptions() {
+  const placeholder = `<option value="" selected>Selecione...</option>`;
+  const options = MODULES.map(
+    ({ type, label }) => `<option value="${type}">${label}</option>`,
+  );
+
+  docTypeEl.innerHTML = [placeholder, ...options].join("\n");
+}
+
 function toggleExtracaoInfoAlert(type) {
   if (!extracaoInfoAlertEl) return;
 
-  const shouldHideAlert = ["LINKS", "RELATORIO_PAUTA_DINAMICA", "PAUTA_MANUAL"].includes(type);
+  const moduleDef = MODULES_BY_TYPE.get(type);
+  const shouldHideAlert = !moduleDef?.showExtracaoInfo;
   extracaoInfoAlertEl.classList.toggle("d-none", shouldHideAlert);
 }
 
@@ -18,7 +29,6 @@ function showMessage(html) {
 }
 
 async function loadAndMount(type) {
-  // desmonta módulo atual
   try {
     currentModule?.destroy?.();
   } catch (e) {
@@ -30,53 +40,28 @@ async function loadAndMount(type) {
 
   if (!type) return;
 
+  const moduleDef = MODULES_BY_TYPE.get(type);
+
+  if (!moduleDef) {
+    showMessage('<div class="text-danger small">Tipo de documento inválido.</div>');
+    return;
+  }
+
   try {
-    if (type === "LINKS") {
-      const mod = await import("./modules/links.js");
-      currentModule = mod.mount(container);
-      return;
-    }
-
-    if (type === "PAUTA_MANUAL") {
-      const mod = await import("./modules/pautaManual.js");
-      currentModule = mod.mount(container);
-      return;
-    }
-
-    if (type === "RELATORIO_PAUTA_DINAMICA") {
-      const mod = await import("./modules/relatorioPautaDinamica.js");
-      currentModule = mod.mount(container);
-      return;
-    }
-
-    if (type === "EXTRACAO_PAUTA_PRE_SESSAO") {
-      const mod = await import("./modules/extracaoPautaPreSessao.js");
-      currentModule = mod.mount(container);
-      return;
-    }
-
-    if (type === "EXTRACAO_PAUTA_POS_SESSAO") {
-      const mod = await import("./modules/extracaoPautaPosSessao.js");
-      currentModule = mod.mount(container);
-      return;
-    }
-
-    showMessage(`<div class="text-danger small">Tipo de documento inválido.</div>`);
+    const mod = await moduleDef.load();
+    currentModule = mod.mount(container);
   } catch (err) {
     console.error("Falha ao carregar módulo:", err);
 
-    // Mostra o erro na tela (isso vai te dizer exatamente o que está faltando)
+    const modulePathsList = MODULES.map(({ path }) => `<li><code>${path}</code></li>`).join("");
+
     showMessage(`
       <div class="alert alert-danger mb-0">
         <div><strong>Não foi possível carregar o módulo selecionado.</strong></div>
         <div class="small mt-2">
           Verifique se os arquivos existem exatamente nesses caminhos (com mesma maiúscula/minúscula):
           <ul class="mb-2">
-            <li><code>./modules/links.js</code></li>
-            <li><code>./modules/pautaManual.js</code></li>
-            <li><code>./modules/relatorioPautaDinamica.js</code></li>
-            <li><code>./modules/extracaoPautaPreSessao.js</code></li>
-            <li><code>./modules/extracaoPautaPosSessao.js</code></li>
+            ${modulePathsList}
           </ul>
           Erro: <code>${String(err?.message || err)}</code>
         </div>
@@ -91,4 +76,5 @@ docTypeEl.addEventListener("change", (e) => {
   loadAndMount(value);
 });
 
+renderModuleOptions();
 toggleExtracaoInfoAlert(docTypeEl.value);
