@@ -146,13 +146,26 @@ export function mount(container) {
     let currentRelator = "";
     let currentRow = null;
     let currentField = "";
+    let currentMiscLines = [];
     let expectingRelatorName = false;
     let expectingProcessNumber = false;
 
     function pushCurrentRow() {
       if (!currentRow) return;
       if (!String(currentRow.Processo || "").trim()) return;
+
+      if (!currentRow["Órgão"] && currentMiscLines.length) {
+        currentRow["Órgão"] = currentMiscLines.shift();
+      }
+      if (!currentRow["Tipo Processo"] && currentMiscLines.length) {
+        currentRow["Tipo Processo"] = currentMiscLines.shift();
+      }
+      if (!currentRow.Interessados && currentMiscLines.length) {
+        currentRow.Interessados = currentMiscLines.join("\n");
+      }
+
       parsed.push(currentRow);
+      currentMiscLines = [];
     }
 
     function ensureRow() {
@@ -203,6 +216,7 @@ export function mount(container) {
         };
         expectingProcessNumber = false;
         currentField = "";
+        currentMiscLines = [];
         continue;
       }
 
@@ -249,6 +263,7 @@ export function mount(container) {
           Advogados: "",
         };
         currentField = "";
+        currentMiscLines = [];
         continue;
       }
 
@@ -256,6 +271,8 @@ export function mount(container) {
         currentRow[currentField] = currentRow[currentField]
           ? `${currentRow[currentField]}\n${line}`
           : line;
+      } else if (currentRow) {
+        currentMiscLines.push(line);
       }
     }
 
@@ -506,35 +523,42 @@ export function mount(container) {
             })
           );
 
-          // Órgão: em negrito
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: upper(row["Órgão"]),
-                  bold: true,
-                  size: SIZE_BODY,
-                  font: FONT,
-                }),
-              ],
-              spacing: { after: SPACE_AFTER_ORGAO },
-            })
-          );
+          const orgao = upper(row["Órgão"]);
+          const tipoProcesso = upper(row["Tipo Processo"]);
 
-          // Tipo Processo: negrito
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: upper(row["Tipo Processo"]),
-                  bold: true,
-                  size: SIZE_BODY,
-                  font: FONT,
-                }),
-              ],
-              spacing: { after: SPACE_AFTER_TIPO },
-            })
-          );
+          if (orgao) {
+            // Órgão: em negrito
+            children.push(
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: orgao,
+                    bold: true,
+                    size: SIZE_BODY,
+                    font: FONT,
+                  }),
+                ],
+                spacing: { after: SPACE_AFTER_ORGAO },
+              })
+            );
+          }
+
+          if (tipoProcesso) {
+            // Tipo Processo: negrito
+            children.push(
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: tipoProcesso,
+                    bold: true,
+                    size: SIZE_BODY,
+                    font: FONT,
+                  }),
+                ],
+                spacing: { after: SPACE_AFTER_TIPO },
+              })
+            );
+          }
 
           // Interessados: sem negrito
           splitLines(row["Interessados"]).forEach((i) => {
