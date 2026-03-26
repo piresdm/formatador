@@ -34,7 +34,7 @@
               Extração Pauta (pós-sessão)
             </option>
           </select>
-        </br>
+          </br>
           <div id="extracaoInfoAlert" class="alert alert-info mb-3" role="alert">
             Nota: A diferença entre a extração <strong>pré-sessão</strong> e a <strong>pós-sessão</strong> é que a
             planilha <strong>pós-sessão</strong> inclui a coluna <strong>“Status Final”</strong>, que apresenta o
@@ -53,6 +53,13 @@
     <!-- PDF (pdfmake) -->
     <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/pdfmake.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js"></script>
+
+    <!-- Leitura de PDF no front -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    </script>
 
     <script type="module" src="app.js"></script>
   </body>
