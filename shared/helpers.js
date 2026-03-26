@@ -92,6 +92,61 @@ export async function readPdfToText(file) {
   return pages.join("\n");
 }
 
+/**
+ * Extrai linhas estruturadas do PDF com coordenadas X/Y.
+ * Retorna: [{ page, y, cells: [{ x, text }], text }]
+ */
+export async function readPdfToStructuredLines(file) {
+  if (!file) throw new Error("Arquivo ausente.");
+  if (!file.name?.toLowerCase?.().endsWith(".pdf")) {
+    throw new Error("Selecione um arquivo .pdf.");
+  }
+
+  const pdfjsLib = await ensurePdfJsLib();
+  if (!pdfjsLib) {
+    throw new Error("Biblioteca pdf.js não carregada (CDN).");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const allLines = [];
+  const Y_TOLERANCE = 2;
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const tokens = content.items
+      .map((item) => ({
+        text: String(item.str ?? "").trim(),
+        x: Number(item.transform?.[4] ?? 0),
+        y: Number(item.transform?.[5] ?? 0),
+      }))
+      .filter((t) => t.text);
+
+    tokens.sort((a, b) => (Math.abs(b.y - a.y) > Y_TOLERANCE ? b.y - a.y : a.x - b.x));
+
+    const lines = [];
+    for (const token of tokens) {
+      const line = lines.find((l) => Math.abs(l.y - token.y) <= Y_TOLERANCE);
+      if (line) {
+        line.cells.push({ x: token.x, text: token.text });
+      } else {
+        lines.push({ page: pageNum, y: token.y, cells: [{ x: token.x, text: token.text }] });
+      }
+    }
+
+    for (const line of lines) {
+      line.cells.sort((a, b) => a.x - b.x);
+      line.text = line.cells.map((c) => c.text).join(" ").replace(/\s+/g, " ").trim();
+    }
+
+    allLines.push(...lines.sort((a, b) => b.y - a.y));
+  }
+
+  return allLines;
+}
+
 async function ensurePdfJsLib() {
   if (window.pdfjsLib?.getDocument) return window.pdfjsLib;
 
