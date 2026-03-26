@@ -18,6 +18,10 @@ function renderModuleOptions() {
 
 function toggleExtracaoInfoAlert(type) {
   if (!extracaoInfoAlertEl) return;
+  if (!type) {
+    extracaoInfoAlertEl.classList.remove("d-none");
+    return;
+  }
 
   const moduleDef = MODULES_BY_TYPE.get(type);
   const shouldHideAlert = !moduleDef?.showExtracaoInfo;
