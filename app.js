@@ -6,6 +6,10 @@ const container = document.getElementById("moduleContainer");
 const extracaoInfoAlertEl = document.getElementById("extracaoInfoAlert");
 
 let currentModule = null;
+const EXTRACAO_ALERT_TYPES = new Set([
+  "EXTRACAO_PAUTA_PRE_SESSAO",
+  "EXTRACAO_PAUTA_POS_SESSAO",
+]);
 
 function renderModuleOptions() {
   const placeholder = `<option value="" selected>Selecione...</option>`;
@@ -19,10 +23,8 @@ function renderModuleOptions() {
 function toggleExtracaoInfoAlert(type) {
   if (!extracaoInfoAlertEl) return;
 
-  const moduleDef = MODULES_BY_TYPE.get(type);
-  const hasSelection = Boolean(type);
-  const shouldHideAlert = hasSelection && !moduleDef?.showExtracaoInfo;
-  extracaoInfoAlertEl.classList.toggle("d-none", shouldHideAlert);
+  const shouldShowAlert = !type || EXTRACAO_ALERT_TYPES.has(type);
+  extracaoInfoAlertEl.classList.toggle("d-none", !shouldShowAlert);
 }
 
 function showMessage(html) {
@@ -78,4 +80,5 @@ docTypeEl.addEventListener("change", (e) => {
 });
 
 renderModuleOptions();
+docTypeEl.value = "";
 toggleExtracaoInfoAlert(docTypeEl.value);
