@@ -82,7 +82,6 @@ export function mount(container) {
     </div>
   `;
 
-  // ===== DOM =====
   const fileInput = container.querySelector("#fileInput");
   const fileInputLabel = container.querySelector("#fileInputLabel");
   const inputModeEl = container.querySelector("#inputMode");
@@ -96,14 +95,12 @@ export function mount(container) {
   const sessionTypeEl = container.querySelector("#sessionType");
   const sessionDateEl = container.querySelector("#sessionDate");
 
-  // ===== Estado do módulo =====
   let rows = null;
   let currentInputMode = "XLSX";
 
-  // ===== Configs =====
   const FONT = "Roboto";
-  const SIZE_HEADER = 22; // 11pt
-  const SIZE_BODY = 20; // 10pt
+  const SIZE_HEADER = 22;
+  const SIZE_BODY = 20;
 
   const SPACE_AFTER_PROCESS_LINE = 120;
   const SPACE_AFTER_ORGAO = 80;
@@ -111,7 +108,6 @@ export function mount(container) {
   const SPACE_AFTER_INTERESSADO = 60;
   const SPACE_AFTER_ADV = 50;
 
-  // ===== Helpers locais =====
   function setStatus(msg) {
     statusEl.textContent = msg;
   }
@@ -179,18 +175,23 @@ export function mount(container) {
     const out = [];
 
     for (let raw of lines) {
-      let line = normalizeWhitespace(raw);
+      let line = String(raw ?? "")
+        .replace(/\u00A0/g, " ")
+        .replace(/[ \t]+/g, " ")
+        .trim();
+
       if (!line) continue;
 
-      line = line
-        .replace(/(\d{4})(RELATOR:)/gi, "$1\n$2")
-        .replace(/(\d{7,8}-\d)(PROCESSO\b)/gi, "$1\n$2")
-        .replace(/(202\d)(RELATOR:)/gi, "$1\n$2")
-        .replace(/(RELATOR:\s*)(CONSELHEIRO)/gi, "$1$2");
+      line = line.replace(/\s*(RELATOR:\s*)/gi, "\n$1");
+      line = line.replace(/(\d{4})(PROCESSO\b)/gi, "$1\n$2");
+      line = line.replace(/(\d{7,8}-\d)(PROCESSO\b)/gi, "$1\n$2");
+      line = line.replace(/(\d{4})(RELATOR:\s*)/gi, "$1\n$2");
+      line = line.replace(/([A-Za-zÀ-ÿ])(\d{7,8}-\d\b)/g, "$1\n$2");
+      line = line.replace(/(\d{7,8}-\d)\s+(\d{7,8}-\d\b)/g, "$1\n$2");
 
       const parts = line
         .split("\n")
-        .map((p) => normalizeWhitespace(p))
+        .map((p) => p.trim())
         .filter(Boolean);
 
       out.push(...parts);
@@ -203,11 +204,13 @@ export function mount(container) {
     const s = upper(normalizeWhitespace(line));
     return (
       s === "PROCESSO ÓRGÃO / INTERESSADO MODALIDADE / TIPO /" ||
-      s === "EXERCÍCIO" ||
       s === "PROCESSO ÓRGAO / INTERESSADO MODALIDADE / TIPO /" ||
-      s === "PROCESSO" ||
+      s === "MODALIDADE / TIPO / EXERCÍCIO" ||
+      s === "MODALIDADE / TIPO / EXERCICIO" ||
       s === "ÓRGÃO / INTERESSADO" ||
-      s === "MODALIDADE / TIPO / EXERCÍCIO"
+      s === "ÓRGAO / INTERESSADO" ||
+      s === "EXERCÍCIO" ||
+      s === "EXERCICIO"
     );
   }
 
@@ -221,16 +224,29 @@ export function mount(container) {
   }
 
   function matchProcessStart(line) {
-    const m = normalizeWhitespace(line).match(/^(\d{7,8}-\d)\s*(.*)$/);
-    if (!m) return null;
-    return {
-      processo: m[1],
-      rest: normalizeWhitespace(m[2] || ""),
-    };
+    const s = normalizeWhitespace(line);
+
+    let m = s.match(/^(\d{7,8}-\d)\s*(.*)$/);
+    if (m) {
+      return {
+        processo: m[1],
+        rest: normalizeWhitespace(m[2] || ""),
+      };
+    }
+
+    m = s.match(/(\d{7,8}-\d)\s*(.*)$/);
+    if (m) {
+      return {
+        processo: m[1],
+        rest: normalizeWhitespace(m[2] || ""),
+      };
+    }
+
+    return null;
   }
 
   function isYearLine(line) {
-    return /^\d{4}$/.test(normalizeWhitespace(line));
+    return /^(19|20)\d{2}$/.test(normalizeWhitespace(line));
   }
 
   function isLawyerLine(line) {
@@ -244,12 +260,10 @@ export function mount(container) {
     if (!line) return false;
     if (isLawyerLine(line)) return false;
 
-    // Continuação típica de quebra de linha do órgão
     if (/(^| )(de|da|do|das|dos|e|em|para|por|ao|aos|à|às|n[oa]s?)$/i.test(prev)) {
       return true;
     }
 
-    // Linha curta depois de órgão longo tende a ser continuação
     if (prev.length >= 35 && line.length <= 35 && !/[0-9]/.test(line)) {
       const upperLine = upper(line);
       const hasInstitutionWord =
@@ -287,7 +301,7 @@ export function mount(container) {
   }
 
   function extractSessionInfoFromPdfLines(lines) {
-    const joined = lines.slice(0, 8).join(" ");
+    const joined = lines.slice(0, 12).join(" ");
     const normalized = normalizeWhitespace(joined);
 
     const dateMatch = normalized.match(/DO DIA\s+(\d{2}\/\d{2}\/\d{4})/i);
@@ -315,80 +329,52 @@ export function mount(container) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
 
-      const items = (textContent.items || [])
-        .map((item) => ({
-          str: normalizeWhitespace(item.str || ""),
-          x: item.transform?.[4] ?? 0,
-          y: item.transform?.[5] ?? 0,
-        }))
-        .filter((item) => item.str);
-
-      items.sort((a, b) => {
-        const dy = Math.abs(b.y - a.y);
-        if (dy > 2) return b.y - a.y;
-        return a.x - b.x;
-      });
-
-      const pageLines = [];
-      let current = [];
-      let currentY = null;
-      const Y_TOLERANCE = 2.2;
-
-      const flush = () => {
-        if (!current.length) return;
-
-        current.sort((a, b) => a.x - b.x);
-
-        const line = current
-          .map((it) => it.str)
-          .join(" ")
-          .replace(/\s+([,.;:])/g, "$1")
-          .replace(/\(\s+/g, "(")
-          .replace(/\s+\)/g, ")")
-          .trim();
-
-        if (line) pageLines.push(line);
-        current = [];
-        currentY = null;
-      };
+      const items = textContent.items || [];
+      let currentLine = "";
 
       for (const item of items) {
-        if (currentY === null) {
-          current = [item];
-          currentY = item.y;
-          continue;
+        const str = String(item.str ?? "")
+          .replace(/\u00A0/g, " ")
+          .replace(/[ \t]+/g, " ")
+          .trim();
+
+        if (!str) continue;
+
+        if (currentLine) {
+          currentLine += " " + str;
+        } else {
+          currentLine = str;
         }
 
-        if (Math.abs(item.y - currentY) <= Y_TOLERANCE) {
-          current.push(item);
-          currentY = (currentY + item.y) / 2;
-        } else {
-          flush();
-          current = [item];
-          currentY = item.y;
+        if (item.hasEOL) {
+          allLines.push(currentLine.trim());
+          currentLine = "";
         }
       }
 
-      flush();
-      allLines.push(...pageLines);
+      if (currentLine.trim()) {
+        allLines.push(currentLine.trim());
+      }
     }
 
     return normalizeExtractedLines(allLines);
   }
 
-  function buildRowFromPdfBlock({
-    processo,
-    relator,
-    blockLines,
-  }) {
+  function buildRowFromPdfBlock({ processo, relator, blockLines }) {
     let lines = blockLines
       .map((l) => normalizeWhitespace(l))
       .filter(Boolean);
 
     lines = joinBrokenOabLines(lines);
+    lines = lines.filter((l) => !isHeaderNoise(l) && !isFooterNoise(l));
 
-    const yearIdx = [...lines].reverse().findIndex((l) => isYearLine(l));
-    const actualYearIdx = yearIdx >= 0 ? lines.length - 1 - yearIdx : -1;
+    let actualYearIdx = -1;
+    for (let idx = lines.length - 1; idx >= 0; idx--) {
+      if (/^(19|20)\d{2}$/.test(lines[idx])) {
+        actualYearIdx = idx;
+        break;
+      }
+    }
 
     if (actualYearIdx < 2) {
       throw new Error(`Não foi possível identificar modalidade/tipo/exercício do processo ${processo}.`);
@@ -480,7 +466,12 @@ export function mount(container) {
         while (i < lines.length) {
           const nextLine = normalizeWhitespace(lines[i]);
 
-          if (!nextLine || isHeaderNoise(nextLine) || isFooterNoise(nextLine)) {
+          if (!nextLine) {
+            i++;
+            continue;
+          }
+
+          if (isHeaderNoise(nextLine) || isFooterNoise(nextLine)) {
             i++;
             continue;
           }
@@ -495,7 +486,7 @@ export function mount(container) {
 
           blockLines.push(nextLine);
 
-          if (isYearLine(nextLine)) {
+          if (/\b(19|20)\d{2}\b/.test(nextLine)) {
             i++;
             break;
           }
@@ -511,7 +502,7 @@ export function mount(container) {
           });
           rowsOut.push(row);
         } catch (err) {
-          console.error("Falha ao montar bloco do processo:", processStart.processo, err);
+          console.error("Falha ao montar bloco do processo:", processStart.processo, blockLines, err);
         }
 
         continue;
@@ -527,6 +518,9 @@ export function mount(container) {
     const lines = await readPdfToLines(file);
     const sessionInfo = extractSessionInfoFromPdfLines(lines);
     const rowsParsed = parseRowsFromPdfLines(lines);
+
+    console.log("PDF lines:", lines);
+    console.log("PDF rows parsed:", rowsParsed);
 
     return {
       rows: rowsParsed,
@@ -545,7 +539,6 @@ export function mount(container) {
     }
   }
 
-  // ===== Regras de tipo do relator =====
   const CONSELHEIROS = [
     "VALDECIR PASCOAL",
     "RANILSON RAMOS",
@@ -562,7 +555,6 @@ export function mount(container) {
     return isConselheiro ? "CONSELHEIRO" : "CONSELHEIRO SUBSTITUTO";
   }
 
-  // ===== Listeners (guardados pra destroy) =====
   const listeners = [];
 
   function on(el, evt, fn) {
@@ -582,7 +574,6 @@ export function mount(container) {
     updateInputModeUI();
   });
 
-  // ===== Leitura do arquivo =====
   on(fileInput, "change", async (e) => {
     previewEl.textContent = "";
     rows = null;
@@ -627,13 +618,11 @@ export function mount(container) {
     }
   });
 
-  // ===== Prévia =====
   on(btnPreview, "click", () => {
     if (!rows) return;
     previewEl.textContent = JSON.stringify(rows.slice(0, 10), null, 2);
   });
 
-  // ===== DOCX =====
   on(btnGenerate, "click", async () => {
     if (!rows) return;
 
@@ -674,7 +663,6 @@ export function mount(container) {
           spacing: { after },
         });
 
-      // ===== Cabeçalho centralizado =====
       children.push(
         new Paragraph({
           alignment: AlignmentType.CENTER,
@@ -722,7 +710,6 @@ export function mount(container) {
 
       children.push(separator());
 
-      // Agrupa por relator (mantém ordem de aparição)
       const grouped = new Map();
       for (const r of rows) {
         const rel = String(r["Relator"] ?? "").trim();
@@ -752,8 +739,6 @@ export function mount(container) {
         for (const row of processos) {
           const sistema = upper(row["Sistema de Tramitação"]);
           const processo = String(row["Processo"] ?? "").trim();
-
-          // No fluxo PDF, voto vem vazio e não deve ser impresso.
           const voto = upper(row["Voto"]) === "LISTADO" ? " (Voto em lista)" : "";
 
           let label = "PROCESSO";
