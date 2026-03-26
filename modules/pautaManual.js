@@ -1,4 +1,4 @@
-/* global docx, saveAs */
+/* global docx, saveAs, pdfjsLib */
 
 import {
   readFirstSheetXlsxToJson,
@@ -44,7 +44,19 @@ export function mount(container) {
             </div>
           </div>
 
-          <label for="fileInput" class="form-label">Selecione o arquivo .xlsx</label>
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label for="inputMode" class="form-label">Tipo de arquivo de entrada</label>
+              <select id="inputMode" class="form-select">
+                <option value="XLSX" selected>XLSX</option>
+                <option value="PDF">PDF</option>
+              </select>
+            </div>
+          </div>
+
+          <label for="fileInput" class="form-label" id="fileInputLabel">
+            Selecione o arquivo .xlsx
+          </label>
           <input class="form-control" type="file" id="fileInput" accept=".xlsx" />
 
           <div class="d-flex gap-2 mt-3">
@@ -72,6 +84,9 @@ export function mount(container) {
 
   // ===== DOM =====
   const fileInput = container.querySelector("#fileInput");
+  const fileInputLabel = container.querySelector("#fileInputLabel");
+  const inputModeEl = container.querySelector("#inputMode");
+
   const btnPreview = container.querySelector("#btnPreview");
   const btnGenerate = container.querySelector("#btnGenerate");
   const statusEl = container.querySelector("#status");
@@ -83,13 +98,13 @@ export function mount(container) {
 
   // ===== Estado do módulo =====
   let rows = null;
+  let currentInputMode = "XLSX";
 
   // ===== Configs =====
   const FONT = "Roboto";
   const SIZE_HEADER = 22; // 11pt
   const SIZE_BODY = 20; // 10pt
 
-  // Espaçamentos (tweak aqui)
   const SPACE_AFTER_PROCESS_LINE = 120;
   const SPACE_AFTER_ORGAO = 80;
   const SPACE_AFTER_TIPO = 80;
@@ -112,6 +127,422 @@ export function mount(container) {
   function updateButtons() {
     btnPreview.disabled = !rows;
     btnGenerate.disabled = !(rows && headerOk());
+  }
+
+  function resetLoadedData() {
+    rows = null;
+    previewEl.textContent = "";
+    fileInput.value = "";
+    updateButtons();
+  }
+
+  function updateInputModeUI() {
+    currentInputMode = inputModeEl.value || "XLSX";
+
+    if (currentInputMode === "PDF") {
+      fileInputLabel.textContent = "Selecione o arquivo .pdf";
+      fileInput.accept = ".pdf,application/pdf";
+      setStatus("Selecione um PDF para extração.");
+    } else {
+      fileInputLabel.textContent = "Selecione o arquivo .xlsx";
+      fileInput.accept = ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      setStatus("Nenhum arquivo selecionado.");
+    }
+
+    resetLoadedData();
+  }
+
+  function normalizeWhitespace(s) {
+    return String(s ?? "")
+      .replace(/\u00A0/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\s+$/g, "")
+      .trim();
+  }
+
+  function toIsoDateFromBR(dateBR) {
+    const m = String(dateBR || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!m) return "";
+    const [, dd, mm, yyyy] = m;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function inferSessionType(raw) {
+    const s = upper(raw);
+    if (s.includes("PRIMEIRA CÂMARA")) return "PRIMEIRA CÂMARA";
+    if (s.includes("SEGUNDA CÂMARA")) return "SEGUNDA CÂMARA";
+    if (s.includes("PLENO")) return "PLENO";
+    return "";
+  }
+
+  function normalizeExtractedLines(lines) {
+    const out = [];
+
+    for (let raw of lines) {
+      let line = normalizeWhitespace(raw);
+      if (!line) continue;
+
+      line = line
+        .replace(/(\d{4})(RELATOR:)/gi, "$1\n$2")
+        .replace(/(\d{7,8}-\d)(PROCESSO\b)/gi, "$1\n$2")
+        .replace(/(202\d)(RELATOR:)/gi, "$1\n$2")
+        .replace(/(RELATOR:\s*)(CONSELHEIRO)/gi, "$1$2");
+
+      const parts = line
+        .split("\n")
+        .map((p) => normalizeWhitespace(p))
+        .filter(Boolean);
+
+      out.push(...parts);
+    }
+
+    return out;
+  }
+
+  function isHeaderNoise(line) {
+    const s = upper(normalizeWhitespace(line));
+    return (
+      s === "PROCESSO ÓRGÃO / INTERESSADO MODALIDADE / TIPO /" ||
+      s === "EXERCÍCIO" ||
+      s === "PROCESSO ÓRGAO / INTERESSADO MODALIDADE / TIPO /" ||
+      s === "PROCESSO" ||
+      s === "ÓRGÃO / INTERESSADO" ||
+      s === "MODALIDADE / TIPO / EXERCÍCIO"
+    );
+  }
+
+  function isFooterNoise(line) {
+    const s = upper(normalizeWhitespace(line));
+    return (
+      /^RECIFE,\s*\d{1,2}\s+DE\s+[A-ZÇÃÉÊÍÓÔÚ]+\s+DE\s+\d{4}\.?$/i.test(s) ||
+      s === "DIRETORIA DE PLENÁRIO" ||
+      s === "DIRETORIA DE PLENARIO"
+    );
+  }
+
+  function matchProcessStart(line) {
+    const m = normalizeWhitespace(line).match(/^(\d{7,8}-\d)\s*(.*)$/);
+    if (!m) return null;
+    return {
+      processo: m[1],
+      rest: normalizeWhitespace(m[2] || ""),
+    };
+  }
+
+  function isYearLine(line) {
+    return /^\d{4}$/.test(normalizeWhitespace(line));
+  }
+
+  function isLawyerLine(line) {
+    return /^(Adv\.|ADV\.|Procurador Habilitado:)/i.test(normalizeWhitespace(line));
+  }
+
+  function looksLikeOrgaoContinuation(currentOrgaoLines, nextLine) {
+    const prev = normalizeWhitespace(currentOrgaoLines.join(" "));
+    const line = normalizeWhitespace(nextLine);
+
+    if (!line) return false;
+    if (isLawyerLine(line)) return false;
+
+    // Continuação típica de quebra de linha do órgão
+    if (/(^| )(de|da|do|das|dos|e|em|para|por|ao|aos|à|às|n[oa]s?)$/i.test(prev)) {
+      return true;
+    }
+
+    // Linha curta depois de órgão longo tende a ser continuação
+    if (prev.length >= 35 && line.length <= 35 && !/[0-9]/.test(line)) {
+      const upperLine = upper(line);
+      const hasInstitutionWord =
+        /(PERNAMBUCO|RECIFE|OLINDA|CARUARU|PETROLINA|ARAÇOIABA|MUNICIPAL|ESTADUAL|SECRETARIA|FUNDO|DEPARTAMENTO|UNIVERSIDADE|TRIBUNAL|CÂMARA|CAMARA|PREFEITURA|FUNDAÇÃO|FUNDACAO|INSTITUTO|NÚCLEO|NUCLEO|POLÍCIA|POLICIA)/i.test(
+          upperLine,
+        );
+      if (hasInstitutionWord) return true;
+    }
+
+    return false;
+  }
+
+  function joinBrokenOabLines(lines) {
+    const result = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const current = normalizeWhitespace(lines[i]);
+      const next = normalizeWhitespace(lines[i + 1] || "");
+
+      if (/OAB:\s*$/i.test(current) && next) {
+        result.push(`${current} ${next}`);
+        i += 1;
+        continue;
+      }
+
+      result.push(current);
+    }
+
+    return result;
+  }
+
+  function classifySistemaTramitacaoByProcesso(processo) {
+    const p = String(processo || "").trim();
+    return /^\d{7}-\d$/.test(p) ? "AP" : "E-TCE";
+  }
+
+  function extractSessionInfoFromPdfLines(lines) {
+    const joined = lines.slice(0, 8).join(" ");
+    const normalized = normalizeWhitespace(joined);
+
+    const dateMatch = normalized.match(/DO DIA\s+(\d{2}\/\d{2}\/\d{4})/i);
+    const typeMatch = normalized.match(
+      /PAUTA DA SESSÃO ORDINÁRIA DA\s+(PLENO|PRIMEIRA CÂMARA|SEGUNDA CÂMARA)/i,
+    );
+
+    return {
+      sessionType: inferSessionType(typeMatch?.[1] || ""),
+      sessionDateIso: toIsoDateFromBR(dateMatch?.[1] || ""),
+    };
+  }
+
+  async function readPdfToLines(file) {
+    if (!window.pdfjsLib) {
+      throw new Error("Biblioteca pdf.js não carregada.");
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    const allLines = [];
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+
+      const items = (textContent.items || [])
+        .map((item) => ({
+          str: normalizeWhitespace(item.str || ""),
+          x: item.transform?.[4] ?? 0,
+          y: item.transform?.[5] ?? 0,
+        }))
+        .filter((item) => item.str);
+
+      items.sort((a, b) => {
+        const dy = Math.abs(b.y - a.y);
+        if (dy > 2) return b.y - a.y;
+        return a.x - b.x;
+      });
+
+      const pageLines = [];
+      let current = [];
+      let currentY = null;
+      const Y_TOLERANCE = 2.2;
+
+      const flush = () => {
+        if (!current.length) return;
+
+        current.sort((a, b) => a.x - b.x);
+
+        const line = current
+          .map((it) => it.str)
+          .join(" ")
+          .replace(/\s+([,.;:])/g, "$1")
+          .replace(/\(\s+/g, "(")
+          .replace(/\s+\)/g, ")")
+          .trim();
+
+        if (line) pageLines.push(line);
+        current = [];
+        currentY = null;
+      };
+
+      for (const item of items) {
+        if (currentY === null) {
+          current = [item];
+          currentY = item.y;
+          continue;
+        }
+
+        if (Math.abs(item.y - currentY) <= Y_TOLERANCE) {
+          current.push(item);
+          currentY = (currentY + item.y) / 2;
+        } else {
+          flush();
+          current = [item];
+          currentY = item.y;
+        }
+      }
+
+      flush();
+      allLines.push(...pageLines);
+    }
+
+    return normalizeExtractedLines(allLines);
+  }
+
+  function buildRowFromPdfBlock({
+    processo,
+    relator,
+    blockLines,
+  }) {
+    let lines = blockLines
+      .map((l) => normalizeWhitespace(l))
+      .filter(Boolean);
+
+    lines = joinBrokenOabLines(lines);
+
+    const yearIdx = [...lines].reverse().findIndex((l) => isYearLine(l));
+    const actualYearIdx = yearIdx >= 0 ? lines.length - 1 - yearIdx : -1;
+
+    if (actualYearIdx < 2) {
+      throw new Error(`Não foi possível identificar modalidade/tipo/exercício do processo ${processo}.`);
+    }
+
+    const exercicio = lines[actualYearIdx];
+    const tipo = lines[actualYearIdx - 1];
+    const modalidade = lines[actualYearIdx - 2];
+
+    const middle = lines.slice(0, actualYearIdx - 2);
+
+    if (!middle.length) {
+      throw new Error(`Não foi possível identificar órgão/interessados do processo ${processo}.`);
+    }
+
+    const orgaoLines = [middle[0]];
+    const interessadosBrutos = [];
+
+    for (let i = 1; i < middle.length; i++) {
+      const line = middle[i];
+
+      if (!interessadosBrutos.length && looksLikeOrgaoContinuation(orgaoLines, line)) {
+        orgaoLines.push(line);
+      } else {
+        interessadosBrutos.push(line);
+      }
+    }
+
+    const advogados = [];
+    const interessados = [];
+
+    for (const item of interessadosBrutos) {
+      if (isLawyerLine(item)) {
+        advogados.push(
+          item
+            .replace(/^Adv\.\s*/i, "")
+            .replace(/^Procurador Habilitado:\s*/i, "Procurador Habilitado: ")
+            .trim(),
+        );
+      } else {
+        interessados.push(item);
+      }
+    }
+
+    return {
+      Processo: processo,
+      Relator: relator,
+      Órgão: orgaoLines.join(" "),
+      "Tipo Processo": tipo,
+      Modalidade: modalidade,
+      Exercício: exercicio,
+      Interessados: interessados.join("\n"),
+      Advogados: advogados.join("\n"),
+      "Sistema de Tramitação": classifySistemaTramitacaoByProcesso(processo),
+      Voto: "",
+    };
+  }
+
+  function parseRowsFromPdfLines(lines) {
+    const rowsOut = [];
+    let currentRelator = "";
+    let i = 0;
+
+    while (i < lines.length) {
+      const rawLine = lines[i];
+      const line = normalizeWhitespace(rawLine);
+
+      if (!line || isHeaderNoise(line) || isFooterNoise(line)) {
+        i++;
+        continue;
+      }
+
+      if (/^RELATOR:/i.test(line)) {
+        currentRelator = normalizeWhitespace(
+          line.replace(/^RELATOR:\s*/i, "").replace(/\s+/g, " "),
+        );
+        i++;
+        continue;
+      }
+
+      const processStart = matchProcessStart(line);
+
+      if (processStart) {
+        const blockLines = [];
+        if (processStart.rest) blockLines.push(processStart.rest);
+
+        i++;
+
+        while (i < lines.length) {
+          const nextLine = normalizeWhitespace(lines[i]);
+
+          if (!nextLine || isHeaderNoise(nextLine) || isFooterNoise(nextLine)) {
+            i++;
+            continue;
+          }
+
+          if (/^RELATOR:/i.test(nextLine)) {
+            break;
+          }
+
+          if (matchProcessStart(nextLine)) {
+            break;
+          }
+
+          blockLines.push(nextLine);
+
+          if (isYearLine(nextLine)) {
+            i++;
+            break;
+          }
+
+          i++;
+        }
+
+        try {
+          const row = buildRowFromPdfBlock({
+            processo: processStart.processo,
+            relator: currentRelator,
+            blockLines,
+          });
+          rowsOut.push(row);
+        } catch (err) {
+          console.error("Falha ao montar bloco do processo:", processStart.processo, err);
+        }
+
+        continue;
+      }
+
+      i++;
+    }
+
+    return rowsOut;
+  }
+
+  async function readPdfToRows(file) {
+    const lines = await readPdfToLines(file);
+    const sessionInfo = extractSessionInfoFromPdfLines(lines);
+    const rowsParsed = parseRowsFromPdfLines(lines);
+
+    return {
+      rows: rowsParsed,
+      sessionInfo,
+      lines,
+    };
+  }
+
+  function fillSessionFieldsIfEmpty(sessionInfo) {
+    if (!sessionTypeEl.value && sessionInfo.sessionType) {
+      sessionTypeEl.value = sessionInfo.sessionType;
+    }
+
+    if (!sessionDateEl.value && sessionInfo.sessionDateIso) {
+      sessionDateEl.value = sessionInfo.sessionDateIso;
+    }
   }
 
   // ===== Regras de tipo do relator =====
@@ -140,13 +571,18 @@ export function mount(container) {
   }
 
   updateButtons();
+  updateInputModeUI();
 
   [sessionNumberEl, sessionTypeEl, sessionDateEl].forEach((el) => {
     on(el, "input", updateButtons);
     on(el, "change", updateButtons);
   });
 
-  // ===== Leitura do XLSX =====
+  on(inputModeEl, "change", () => {
+    updateInputModeUI();
+  });
+
+  // ===== Leitura do arquivo =====
   on(fileInput, "change", async (e) => {
     previewEl.textContent = "";
     rows = null;
@@ -158,15 +594,34 @@ export function mount(container) {
       return;
     }
 
-    setStatus("Lendo XLSX...");
-
     try {
+      if (currentInputMode === "PDF") {
+        setStatus("Lendo PDF...");
+
+        const result = await readPdfToRows(file);
+        rows = result.rows || [];
+        fillSessionFieldsIfEmpty(result.sessionInfo);
+
+        if (!rows.length) {
+          setStatus("PDF lido, mas nenhum processo foi identificado.");
+          rows = null;
+          updateButtons();
+          return;
+        }
+
+        setStatus(`PDF OK. Processos identificados: ${rows.length}.`);
+        updateButtons();
+        return;
+      }
+
+      setStatus("Lendo XLSX...");
       rows = await readFirstSheetXlsxToJson(file);
+
       setStatus(`XLSX OK. Linhas: ${rows.length}.`);
       updateButtons();
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || "Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
+      setStatus(err?.message || `Erro ao ler ${currentInputMode}. Abra o Console (F12) e veja o erro.`);
       rows = null;
       updateButtons();
     }
@@ -181,10 +636,12 @@ export function mount(container) {
   // ===== DOCX =====
   on(btnGenerate, "click", async () => {
     if (!rows) return;
+
     if (!headerOk()) {
       setStatus("Preencha Nº da sessão, Tipo de sessão e Data.");
       return;
     }
+
     if (!window.docx || !window.saveAs) {
       setStatus("Bibliotecas docx/FileSaver não carregadas (CDN).");
       return;
@@ -276,7 +733,6 @@ export function mount(container) {
       for (const [relator, processos] of grouped.entries()) {
         const prefix = relatorPrefix(relator);
 
-        // RELATOR: em negrito, tamanho 11
         children.push(
           new Paragraph({
             children: [
@@ -291,16 +747,18 @@ export function mount(container) {
           })
         );
 
-        // Linha em branco entre relator e primeiro processo
         children.push(blankLine(120));
 
         for (const row of processos) {
           const sistema = upper(row["Sistema de Tramitação"]);
           const processo = String(row["Processo"] ?? "").trim();
+
+          // No fluxo PDF, voto vem vazio e não deve ser impresso.
           const voto = upper(row["Voto"]) === "LISTADO" ? " (Voto em lista)" : "";
 
           let label = "PROCESSO";
           let color = "000000";
+
           if (sistema === "E-TCE") {
             label = "PROCESSO ELETRÔNICO eTCE";
             color = "FF0000";
@@ -309,7 +767,6 @@ export function mount(container) {
             color = "0070C0";
           }
 
-          // Linha do processo (negrito). Só o label colorido.
           children.push(
             new Paragraph({
               children: [
@@ -332,7 +789,6 @@ export function mount(container) {
             })
           );
 
-          // Órgão: em negrito
           children.push(
             new Paragraph({
               children: [
@@ -347,7 +803,6 @@ export function mount(container) {
             })
           );
 
-          // Tipo Processo: negrito
           children.push(
             new Paragraph({
               children: [
@@ -362,7 +817,6 @@ export function mount(container) {
             })
           );
 
-          // Interessados: sem negrito
           splitLines(row["Interessados"]).forEach((i) => {
             children.push(
               new Paragraph({
@@ -379,7 +833,6 @@ export function mount(container) {
             );
           });
 
-          // Advogados: sem negrito
           splitLines(row["Advogados"]).forEach((a) => {
             children.push(
               new Paragraph({
@@ -396,7 +849,6 @@ export function mount(container) {
             );
           });
 
-          // Espaço entre processos
           children.push(blankLine(120));
         }
 
@@ -416,13 +868,9 @@ export function mount(container) {
     }
   });
 
-  // interface do módulo
   return {
     destroy() {
-      // remove listeners
       listeners.forEach((off) => off());
-      // limpa o container (opcional)
-      // container.innerHTML = "";
     },
   };
 }
