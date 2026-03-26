@@ -20,7 +20,8 @@ function toggleExtracaoInfoAlert(type) {
   if (!extracaoInfoAlertEl) return;
 
   const moduleDef = MODULES_BY_TYPE.get(type);
-  const shouldHideAlert = !moduleDef?.showExtracaoInfo;
+  const hasSelection = Boolean(type);
+  const shouldHideAlert = hasSelection && !moduleDef?.showExtracaoInfo;
   extracaoInfoAlertEl.classList.toggle("d-none", shouldHideAlert);
 }
 
