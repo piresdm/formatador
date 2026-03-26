@@ -140,7 +140,7 @@ export function mount(container) {
       .map((l) => l.replace(/\s+/g, " ").trim())
       .filter(Boolean);
 
-    const processPattern = /(?:\d{7}-\d|\d{5,}[./-]\d{1,4}|\d{6,})/;
+    const processPattern = /(?:\d{7}\s*-\s*\d|\d{5,}\s*[./-]\s*\d{1,4}|\d{6,})/;
 
     const parsed = [];
     let currentRelator = "";
@@ -195,7 +195,7 @@ export function mount(container) {
         pushCurrentRow();
         currentRow = {
           Relator: currentRelator,
-          Processo: procMatch[0],
+          Processo: procMatch[0].replace(/\s*([./-])\s*/g, "$1"),
           Órgão: "",
           "Tipo Processo": "",
           Interessados: "",
@@ -242,7 +242,7 @@ export function mount(container) {
         pushCurrentRow();
         currentRow = {
           Relator: currentRelator,
-          Processo: procMatch[0],
+          Processo: procMatch[0].replace(/\s*([./-])\s*/g, "$1"),
           Órgão: "",
           "Tipo Processo": "",
           Interessados: "",

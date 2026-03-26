@@ -76,10 +76,14 @@ export async function readPdfToText(file) {
   for (let i = 1; i <= pdf.numPages; i += 1) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => String(item.str ?? "").trim())
-      .filter(Boolean)
-      .join("\n");
+    const fragments = [];
+    for (const item of content.items) {
+      const chunk = String(item.str ?? "").trim();
+      if (!chunk) continue;
+      fragments.push(chunk);
+      fragments.push(item.hasEOL ? "\n" : " ");
+    }
+    const pageText = fragments.join("").replace(/[ \t]+\n/g, "\n").trim();
     pages.push(pageText);
   }
 
