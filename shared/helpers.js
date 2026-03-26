@@ -56,6 +56,135 @@ export async function readFirstSheetXlsxToJson(file) {
   return window.XLSX.utils.sheet_to_json(sheet, { defval: "" });
 }
 
+/**
+ * Extrai texto de um PDF usando pdf.js (window.pdfjsLib).
+ */
+export async function readPdfToText(file) {
+  if (!file) throw new Error("Arquivo ausente.");
+  if (!file.name?.toLowerCase?.().endsWith(".pdf")) {
+    throw new Error("Selecione um arquivo .pdf.");
+  }
+
+  const pdfjsLib = await ensurePdfJsLib();
+  if (!pdfjsLib) {
+    throw new Error("Biblioteca pdf.js não carregada (CDN).");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+
+  for (let i = 1; i <= pdf.numPages; i += 1) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const fragments = [];
+    for (const item of content.items) {
+      const chunk = String(item.str ?? "").trim();
+      if (!chunk) continue;
+      fragments.push(chunk);
+      fragments.push(item.hasEOL ? "\n" : " ");
+    }
+    const pageText = fragments.join("").replace(/[ \t]+\n/g, "\n").trim();
+    pages.push(pageText);
+  }
+
+  return pages.join("\n");
+}
+
+/**
+ * Extrai linhas estruturadas do PDF com coordenadas X/Y.
+ * Retorna: [{ page, y, cells: [{ x, text }], text }]
+ */
+export async function readPdfToStructuredLines(file) {
+  if (!file) throw new Error("Arquivo ausente.");
+  if (!file.name?.toLowerCase?.().endsWith(".pdf")) {
+    throw new Error("Selecione um arquivo .pdf.");
+  }
+
+  const pdfjsLib = await ensurePdfJsLib();
+  if (!pdfjsLib) {
+    throw new Error("Biblioteca pdf.js não carregada (CDN).");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const allLines = [];
+  const Y_TOLERANCE = 2;
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const tokens = content.items
+      .map((item) => ({
+        text: String(item.str ?? "").trim(),
+        x: Number(item.transform?.[4] ?? 0),
+        y: Number(item.transform?.[5] ?? 0),
+      }))
+      .filter((t) => t.text);
+
+    tokens.sort((a, b) => (Math.abs(b.y - a.y) > Y_TOLERANCE ? b.y - a.y : a.x - b.x));
+
+    const lines = [];
+    for (const token of tokens) {
+      const line = lines.find((l) => Math.abs(l.y - token.y) <= Y_TOLERANCE);
+      if (line) {
+        line.cells.push({ x: token.x, text: token.text });
+      } else {
+        lines.push({ page: pageNum, y: token.y, cells: [{ x: token.x, text: token.text }] });
+      }
+    }
+
+    for (const line of lines) {
+      line.cells.sort((a, b) => a.x - b.x);
+      line.text = line.cells.map((c) => c.text).join(" ").replace(/\s+/g, " ").trim();
+    }
+
+    allLines.push(...lines.sort((a, b) => b.y - a.y));
+  }
+
+  return allLines;
+}
+
+async function ensurePdfJsLib() {
+  if (window.pdfjsLib?.getDocument) return window.pdfjsLib;
+
+  const dynamicSources = [
+    {
+      lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.8.69/build/pdf.min.mjs",
+      worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.8.69/build/pdf.worker.min.mjs",
+    },
+    {
+      lib: "https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.min.mjs",
+      worker: "https://unpkg.com/pdfjs-dist@4.8.69/build/pdf.worker.min.mjs",
+    },
+    {
+      lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.mjs",
+      worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.mjs",
+    },
+  ];
+
+  for (const source of dynamicSources) {
+    const mod = await import(source.lib).catch(() => null);
+    const candidate = mod?.default || mod;
+    if (!candidate?.getDocument) continue;
+    if (candidate?.GlobalWorkerOptions) {
+      candidate.GlobalWorkerOptions.workerSrc = source.worker;
+    }
+    window.pdfjsLib = candidate;
+    return candidate;
+  }
+
+  const globalFallback = window["pdfjs-dist/build/pdf"];
+  if (globalFallback?.getDocument) {
+    window.pdfjsLib = globalFallback;
+    return globalFallback;
+  }
+
+  return null;
+}
+
 export function safeFilename(s) {
   return String(s ?? "")
     .trim()

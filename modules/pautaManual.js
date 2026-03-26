@@ -2,6 +2,8 @@
 
 import {
   readFirstSheetXlsxToJson,
+  readPdfToText,
+  readPdfToStructuredLines,
   splitLines,
   upper,
   normalizeName,
@@ -44,8 +46,19 @@ export function mount(container) {
             </div>
           </div>
 
-          <label for="fileInput" class="form-label">Selecione o arquivo .xlsx</label>
-          <input class="form-control" type="file" id="fileInput" accept=".xlsx" />
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label for="inputType" class="form-label">Tipo de documento</label>
+              <select id="inputType" class="form-select" required>
+                <option value="XLS" selected>XLS</option>
+                <option value="PDF">PDF</option>
+              </select>
+            </div>
+            <div class="col-md-9">
+              <label for="fileInput" class="form-label">Selecione o arquivo</label>
+              <input class="form-control" type="file" id="fileInput" accept=".xlsx" />
+            </div>
+          </div>
 
           <div class="d-flex gap-2 mt-3">
             <button id="btnPreview" class="btn btn-outline-secondary" disabled>
@@ -72,6 +85,7 @@ export function mount(container) {
 
   // ===== DOM =====
   const fileInput = container.querySelector("#fileInput");
+  const inputTypeEl = container.querySelector("#inputType");
   const btnPreview = container.querySelector("#btnPreview");
   const btnGenerate = container.querySelector("#btnGenerate");
   const statusEl = container.querySelector("#status");
@@ -83,6 +97,7 @@ export function mount(container) {
 
   // ===== Estado do módulo =====
   let rows = null;
+  let inputType = "XLS";
 
   // ===== Configs =====
   const FONT = "Roboto";
@@ -112,6 +127,273 @@ export function mount(container) {
   function updateButtons() {
     btnPreview.disabled = !rows;
     btnGenerate.disabled = !(rows && headerOk());
+  }
+
+  function inferSistemaFromProcesso(processoRaw) {
+    const processo = String(processoRaw ?? "").trim().replace(/\s+/g, "");
+    return /^\d{7}-\d$/.test(processo) ? "AP" : "E-TCE";
+  }
+
+  function mapPdfStructuredLinesToRows(lines) {
+    const processPattern = /(?:\d{7}\s*-\s*\d|\d{5,}\s*[./-]\s*\d{1,4}|\d{6,})/;
+    const toUpper = (v) => upper(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    let processoX = 120;
+    let orgaoX = 280;
+    let modalidadeX = 430;
+
+    for (const line of lines) {
+      for (const cell of line.cells) {
+        const t = toUpper(cell.text);
+        if (t.includes("PROCESSO")) processoX = cell.x;
+        if (t.includes("ORGAO") || t.includes("INTERESSADO")) orgaoX = cell.x;
+        if (t.includes("MODALIDADE") || t === "TIPO" || t.includes("EXERCICIO")) {
+          modalidadeX = cell.x;
+        }
+      }
+    }
+
+    const bound1 = (processoX + orgaoX) / 2;
+    const bound2 = (orgaoX + modalidadeX) / 2;
+
+    const parsed = [];
+    let currentRelator = "";
+    let currentRow = null;
+    let col2Lines = [];
+    let col3Lines = [];
+
+    function normalizeProcesso(p) {
+      return String(p ?? "").replace(/\s*([./-])\s*/g, "$1").trim();
+    }
+
+    function finalizeCurrentRow() {
+      if (!currentRow?.Processo) return;
+
+      const col2 = col2Lines.filter(Boolean);
+      const col3 = col3Lines.filter(Boolean);
+      const adv = col2.filter((v) => /^(ADV|ADVOGADO)/i.test(v));
+      const interessados = col2.filter((v) => !/^(ADV|ADVOGADO)/i.test(v));
+
+      currentRow["Órgão"] = currentRow["Órgão"] || interessados[0] || "";
+      currentRow.Interessados =
+        currentRow.Interessados || interessados.slice(1).join("\n");
+
+      const tipoFromLabel =
+        col3.find((v) => /TIPO\s*[:\-]/i.test(v))?.replace(/.*TIPO\s*[:\-]\s*/i, "") || "";
+      currentRow["Tipo Processo"] =
+        currentRow["Tipo Processo"] ||
+        tipoFromLabel ||
+        col3[1] ||
+        col3[0] ||
+        "";
+      currentRow.Advogados = currentRow.Advogados || adv.join("\n");
+
+      parsed.push(currentRow);
+      currentRow = null;
+      col2Lines = [];
+      col3Lines = [];
+    }
+
+    for (const line of lines) {
+      const processTokens = [];
+      const col2Tokens = [];
+      const col3Tokens = [];
+
+      for (const cell of line.cells) {
+        if (cell.x <= bound1) processTokens.push(cell.text);
+        else if (cell.x <= bound2) col2Tokens.push(cell.text);
+        else col3Tokens.push(cell.text);
+      }
+
+      const col1Text = processTokens.join(" ").trim();
+      const col2Text = col2Tokens.join(" ").trim();
+      const col3Text = col3Tokens.join(" ").trim();
+      const normalizedLine = toUpper(line.text);
+
+      const relatorMatch = line.text.match(/RELATOR(?:A)?\s*:\s*(.+)$/i);
+      if (relatorMatch) {
+        currentRelator = relatorMatch[1].trim();
+        continue;
+      }
+      if (!currentRelator && normalizedLine.startsWith("RELATOR")) {
+        continue;
+      }
+
+      const processMatch = col1Text.match(processPattern) || line.text.match(processPattern);
+      if (processMatch) {
+        finalizeCurrentRow();
+        currentRow = {
+          Relator: currentRelator,
+          Processo: normalizeProcesso(processMatch[0]),
+          Órgão: "",
+          "Tipo Processo": "",
+          Interessados: "",
+          Advogados: "",
+        };
+        continue;
+      }
+
+      if (!currentRow) continue;
+
+      if (col2Text && !/^(PROCESSO|ORGAO|INTERESSADO)$/i.test(toUpper(col2Text))) {
+        col2Lines.push(col2Text);
+      }
+      if (col3Text && !/^(MODALIDADE|TIPO|EXERCICIO)$/i.test(toUpper(col3Text))) {
+        col3Lines.push(col3Text);
+      }
+    }
+
+    finalizeCurrentRow();
+    return parsed;
+  }
+
+  function mapPdfTextToRows(rawText) {
+    const text = String(rawText ?? "").replace(/\r/g, "");
+    const lines = text
+      .split("\n")
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+
+    const processPattern = /(?:\d{7}\s*-\s*\d|\d{5,}\s*[./-]\s*\d{1,4}|\d{6,})/;
+
+    const parsed = [];
+    let currentRelator = "";
+    let currentRow = null;
+    let currentField = "";
+    let currentMiscLines = [];
+    let expectingRelatorName = false;
+    let expectingProcessNumber = false;
+
+    function pushCurrentRow() {
+      if (!currentRow) return;
+      if (!String(currentRow.Processo || "").trim()) return;
+
+      if (!currentRow["Órgão"] && currentMiscLines.length) {
+        currentRow["Órgão"] = currentMiscLines.shift();
+      }
+      if (!currentRow["Tipo Processo"] && currentMiscLines.length) {
+        currentRow["Tipo Processo"] = currentMiscLines.shift();
+      }
+      if (!currentRow.Interessados && currentMiscLines.length) {
+        currentRow.Interessados = currentMiscLines.join("\n");
+      }
+
+      parsed.push(currentRow);
+      currentMiscLines = [];
+    }
+
+    function ensureRow() {
+      if (currentRow) return;
+      currentRow = {
+        Relator: currentRelator,
+        Processo: "",
+        Órgão: "",
+        "Tipo Processo": "",
+        Interessados: "",
+        Advogados: "",
+      };
+    }
+
+    for (const line of lines) {
+      const upLine = upper(line).replace(":", "");
+
+      if (upLine.startsWith("RELATOR")) {
+        const sameLine = line.split(":")[1]?.trim() || "";
+        currentRelator = sameLine;
+        expectingRelatorName = !sameLine;
+        currentField = "";
+        continue;
+      }
+
+      if (expectingRelatorName) {
+        currentRelator = line;
+        expectingRelatorName = false;
+        continue;
+      }
+
+      if (upLine === "PROCESSO" || upLine === "Nº" || upLine === "N°") {
+        expectingProcessNumber = true;
+        currentField = "";
+        continue;
+      }
+
+      const procMatch = line.match(processPattern);
+      if (expectingProcessNumber && procMatch) {
+        pushCurrentRow();
+        currentRow = {
+          Relator: currentRelator,
+          Processo: procMatch[0].replace(/\s*([./-])\s*/g, "$1"),
+          Órgão: "",
+          "Tipo Processo": "",
+          Interessados: "",
+          Advogados: "",
+        };
+        expectingProcessNumber = false;
+        currentField = "";
+        currentMiscLines = [];
+        continue;
+      }
+
+      if (upLine.startsWith("ÓRGÃO") || upLine.startsWith("ORGAO")) {
+        ensureRow();
+        currentField = "Órgão";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow["Órgão"] = value;
+        continue;
+      }
+
+      if (upLine.startsWith("TIPO PROCESSO")) {
+        ensureRow();
+        currentField = "Tipo Processo";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow["Tipo Processo"] = value;
+        continue;
+      }
+
+      if (upLine.startsWith("INTERESSADO")) {
+        ensureRow();
+        currentField = "Interessados";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow.Interessados = value;
+        continue;
+      }
+
+      if (upLine.startsWith("ADVOGADO")) {
+        ensureRow();
+        currentField = "Advogados";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow.Advogados = value;
+        continue;
+      }
+
+      if (!currentRow && procMatch) {
+        pushCurrentRow();
+        currentRow = {
+          Relator: currentRelator,
+          Processo: procMatch[0].replace(/\s*([./-])\s*/g, "$1"),
+          Órgão: "",
+          "Tipo Processo": "",
+          Interessados: "",
+          Advogados: "",
+        };
+        currentField = "";
+        currentMiscLines = [];
+        continue;
+      }
+
+      if (currentRow && currentField) {
+        currentRow[currentField] = currentRow[currentField]
+          ? `${currentRow[currentField]}\n${line}`
+          : line;
+      } else if (currentRow) {
+        currentMiscLines.push(line);
+      }
+    }
+
+    pushCurrentRow();
+
+    if (!parsed.length) throw new Error("Não foi possível identificar os processos no PDF.");
+    return parsed;
   }
 
   // ===== Regras de tipo do relator =====
@@ -146,6 +428,20 @@ export function mount(container) {
     on(el, "change", updateButtons);
   });
 
+  on(inputTypeEl, "change", () => {
+    inputType = inputTypeEl.value === "PDF" ? "PDF" : "XLS";
+    fileInput.value = "";
+    rows = null;
+    previewEl.textContent = "";
+    fileInput.accept = inputType === "PDF" ? ".pdf" : ".xlsx";
+    setStatus(
+      inputType === "PDF"
+        ? "Tipo PDF selecionado. Escolha um arquivo .pdf."
+        : "Tipo XLS selecionado. Escolha um arquivo .xlsx."
+    );
+    updateButtons();
+  });
+
   // ===== Leitura do XLSX =====
   on(fileInput, "change", async (e) => {
     previewEl.textContent = "";
@@ -158,15 +454,29 @@ export function mount(container) {
       return;
     }
 
-    setStatus("Lendo XLSX...");
+    setStatus(inputType === "PDF" ? "Lendo PDF..." : "Lendo XLSX...");
 
     try {
-      rows = await readFirstSheetXlsxToJson(file);
-      setStatus(`XLSX OK. Linhas: ${rows.length}.`);
+      if (inputType === "PDF") {
+        const structured = await readPdfToStructuredLines(file);
+        rows = mapPdfStructuredLinesToRows(structured);
+        if (!rows.length) {
+          rows = mapPdfTextToRows(await readPdfToText(file));
+        }
+      } else {
+        rows = await readFirstSheetXlsxToJson(file);
+      }
+      if (!rows?.length) {
+        throw new Error("Não foi possível extrair processos do arquivo informado.");
+      }
+      setStatus(`${inputType} OK. Linhas: ${rows.length}.`);
       updateButtons();
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || "Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
+      setStatus(
+        err?.message ||
+          `Erro ao ler ${inputType}. Abra o Console (F12) e veja o erro.`
+      );
       rows = null;
       updateButtons();
     }
@@ -295,17 +605,20 @@ export function mount(container) {
         children.push(blankLine(120));
 
         for (const row of processos) {
-          const sistema = upper(row["Sistema de Tramitação"]);
+          const sistema =
+            inputType === "PDF"
+              ? inferSistemaFromProcesso(row["Processo"])
+              : upper(row["Sistema de Tramitação"]) ||
+                inferSistemaFromProcesso(row["Processo"]);
           const processo = String(row["Processo"] ?? "").trim();
-          const voto = upper(row["Voto"]) === "LISTADO" ? " (Voto em lista)" : "";
 
           let label = "PROCESSO";
           let color = "000000";
           if (sistema === "E-TCE") {
-            label = "PROCESSO ELETRÔNICO eTCE";
+            label = "PROCESSO ELETRÔNICO";
             color = "FF0000";
           } else if (sistema === "AP") {
-            label = "PROCESSO DIGITAL TCE";
+            label = "PROCESSO DIGITAL";
             color = "0070C0";
           }
 
@@ -321,7 +634,7 @@ export function mount(container) {
                   font: FONT,
                 }),
                 new TextRun({
-                  text: `Nº ${processo}${voto}`,
+                  text: `Nº ${processo}`,
                   bold: true,
                   color: "000000",
                   size: SIZE_BODY,
@@ -332,35 +645,42 @@ export function mount(container) {
             })
           );
 
-          // Órgão: em negrito
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: upper(row["Órgão"]),
-                  bold: true,
-                  size: SIZE_BODY,
-                  font: FONT,
-                }),
-              ],
-              spacing: { after: SPACE_AFTER_ORGAO },
-            })
-          );
+          const orgao = upper(row["Órgão"]);
+          const tipoProcesso = upper(row["Tipo Processo"]);
 
-          // Tipo Processo: negrito
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: upper(row["Tipo Processo"]),
-                  bold: true,
-                  size: SIZE_BODY,
-                  font: FONT,
-                }),
-              ],
-              spacing: { after: SPACE_AFTER_TIPO },
-            })
-          );
+          if (orgao) {
+            // Órgão: em negrito
+            children.push(
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: orgao,
+                    bold: true,
+                    size: SIZE_BODY,
+                    font: FONT,
+                  }),
+                ],
+                spacing: { after: SPACE_AFTER_ORGAO },
+              })
+            );
+          }
+
+          if (tipoProcesso) {
+            // Tipo Processo: negrito
+            children.push(
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: tipoProcesso,
+                    bold: true,
+                    size: SIZE_BODY,
+                    font: FONT,
+                  }),
+                ],
+                spacing: { after: SPACE_AFTER_TIPO },
+              })
+            );
+          }
 
           // Interessados: sem negrito
           splitLines(row["Interessados"]).forEach((i) => {
