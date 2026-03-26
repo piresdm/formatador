@@ -135,59 +135,133 @@ export function mount(container) {
 
   function mapPdfTextToRows(rawText) {
     const text = String(rawText ?? "").replace(/\r/g, "");
-    const compact = text.replace(/[ \t]+/g, " ");
+    const lines = text
+      .split("\n")
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
 
-    const relatorMap = new Map();
-    const relatorRegex = /RELATOR(?:A)?:\s*([^\n]+)/gi;
-    let relatorMatch = relatorRegex.exec(compact);
-    while (relatorMatch) {
-      relatorMap.set(relatorMatch.index, relatorMatch[1].trim());
-      relatorMatch = relatorRegex.exec(compact);
+    const processPattern = /(?:\d{7}-\d|\d{5,}[./-]\d{1,4}|\d{6,})/;
+
+    const parsed = [];
+    let currentRelator = "";
+    let currentRow = null;
+    let currentField = "";
+    let expectingRelatorName = false;
+    let expectingProcessNumber = false;
+
+    function pushCurrentRow() {
+      if (!currentRow) return;
+      if (!String(currentRow.Processo || "").trim()) return;
+      parsed.push(currentRow);
     }
 
-    const processoRegex = /PROCESSO[\s\S]{0,80}?N[º°o]?\s*([0-9./-]+)\s*([\s\S]*?)(?=PROCESSO[\s\S]{0,80}?N[º°o]?\s*[0-9./-]+|RELATOR(?:A)?:|$)/gi;
-    const parsed = [];
-    let match = processoRegex.exec(compact);
+    function ensureRow() {
+      if (currentRow) return;
+      currentRow = {
+        Relator: currentRelator,
+        Processo: "",
+        Órgão: "",
+        "Tipo Processo": "",
+        Interessados: "",
+        Advogados: "",
+      };
+    }
 
-    while (match) {
-      const blocoInicio = match.index;
-      const processo = String(match[1] ?? "").trim();
-      const bloco = String(match[2] ?? "").trim();
+    for (const line of lines) {
+      const upLine = upper(line).replace(":", "");
 
-      let relator = "";
-      for (const [idx, nome] of relatorMap.entries()) {
-        if (idx <= blocoInicio) relator = nome;
+      if (upLine.startsWith("RELATOR")) {
+        const sameLine = line.split(":")[1]?.trim() || "";
+        currentRelator = sameLine;
+        expectingRelatorName = !sameLine;
+        currentField = "";
+        continue;
       }
 
-      const orgao = (bloco.match(/(?:ÓRGÃO|ORGAO):?\s*([^\n]+)/i)?.[1] ?? "").trim();
-      const tipoProcesso = (bloco.match(/TIPO\s+PROCESSO:?\s*([^\n]+)/i)?.[1] ?? "").trim();
-      const interessados = (bloco.match(/INTERESSADOS?:?\s*([\s\S]*?)(?=ADVOGADOS?:|$)/i)?.[1] ?? "")
-        .split(/\s*\|\s*|\s{2,}|\n/)
-        .map((v) => v.trim())
-        .filter(Boolean)
-        .join("\n");
-      const advogados = (bloco.match(/ADVOGADOS?:?\s*([\s\S]*)$/i)?.[1] ?? "")
-        .split(/\s*\|\s*|\s{2,}|\n/)
-        .map((v) => v.trim())
-        .filter(Boolean)
-        .join("\n");
+      if (expectingRelatorName) {
+        currentRelator = line;
+        expectingRelatorName = false;
+        continue;
+      }
 
-      parsed.push({
-        Relator: relator,
-        Processo: processo,
-        Órgão: orgao,
-        "Tipo Processo": tipoProcesso,
-        Interessados: interessados,
-        Advogados: advogados,
-      });
+      if (upLine === "PROCESSO" || upLine === "Nº" || upLine === "N°") {
+        expectingProcessNumber = true;
+        currentField = "";
+        continue;
+      }
 
-      match = processoRegex.exec(compact);
+      const procMatch = line.match(processPattern);
+      if (expectingProcessNumber && procMatch) {
+        pushCurrentRow();
+        currentRow = {
+          Relator: currentRelator,
+          Processo: procMatch[0],
+          Órgão: "",
+          "Tipo Processo": "",
+          Interessados: "",
+          Advogados: "",
+        };
+        expectingProcessNumber = false;
+        currentField = "";
+        continue;
+      }
+
+      if (upLine.startsWith("ÓRGÃO") || upLine.startsWith("ORGAO")) {
+        ensureRow();
+        currentField = "Órgão";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow["Órgão"] = value;
+        continue;
+      }
+
+      if (upLine.startsWith("TIPO PROCESSO")) {
+        ensureRow();
+        currentField = "Tipo Processo";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow["Tipo Processo"] = value;
+        continue;
+      }
+
+      if (upLine.startsWith("INTERESSADO")) {
+        ensureRow();
+        currentField = "Interessados";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow.Interessados = value;
+        continue;
+      }
+
+      if (upLine.startsWith("ADVOGADO")) {
+        ensureRow();
+        currentField = "Advogados";
+        const value = line.split(":").slice(1).join(":").trim();
+        if (value) currentRow.Advogados = value;
+        continue;
+      }
+
+      if (!currentRow && procMatch) {
+        pushCurrentRow();
+        currentRow = {
+          Relator: currentRelator,
+          Processo: procMatch[0],
+          Órgão: "",
+          "Tipo Processo": "",
+          Interessados: "",
+          Advogados: "",
+        };
+        currentField = "";
+        continue;
+      }
+
+      if (currentRow && currentField) {
+        currentRow[currentField] = currentRow[currentField]
+          ? `${currentRow[currentField]}\n${line}`
+          : line;
+      }
     }
 
-    if (!parsed.length) {
-      throw new Error("Não foi possível identificar os processos no PDF.");
-    }
+    pushCurrentRow();
 
+    if (!parsed.length) throw new Error("Não foi possível identificar os processos no PDF.");
     return parsed;
   }
 
