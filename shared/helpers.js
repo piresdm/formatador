@@ -56,6 +56,36 @@ export async function readFirstSheetXlsxToJson(file) {
   return window.XLSX.utils.sheet_to_json(sheet, { defval: "" });
 }
 
+/**
+ * Extrai texto de um PDF usando pdf.js (window.pdfjsLib).
+ */
+export async function readPdfToText(file) {
+  if (!file) throw new Error("Arquivo ausente.");
+  if (!file.name?.toLowerCase?.().endsWith(".pdf")) {
+    throw new Error("Selecione um arquivo .pdf.");
+  }
+  if (!window.pdfjsLib) {
+    throw new Error("Biblioteca pdf.js não carregada (CDN).");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+
+  for (let i = 1; i <= pdf.numPages; i += 1) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item) => String(item.str ?? "").trim())
+      .filter(Boolean)
+      .join("\n");
+    pages.push(pageText);
+  }
+
+  return pages.join("\n");
+}
+
 export function safeFilename(s) {
   return String(s ?? "")
     .trim()

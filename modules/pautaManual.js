@@ -2,6 +2,7 @@
 
 import {
   readFirstSheetXlsxToJson,
+  readPdfToText,
   splitLines,
   upper,
   normalizeName,
@@ -44,8 +45,19 @@ export function mount(container) {
             </div>
           </div>
 
-          <label for="fileInput" class="form-label">Selecione o arquivo .xlsx</label>
-          <input class="form-control" type="file" id="fileInput" accept=".xlsx" />
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label for="inputType" class="form-label">Tipo de documento</label>
+              <select id="inputType" class="form-select" required>
+                <option value="XLS" selected>XLS</option>
+                <option value="PDF">PDF</option>
+              </select>
+            </div>
+            <div class="col-md-9">
+              <label for="fileInput" class="form-label">Selecione o arquivo</label>
+              <input class="form-control" type="file" id="fileInput" accept=".xlsx" />
+            </div>
+          </div>
 
           <div class="d-flex gap-2 mt-3">
             <button id="btnPreview" class="btn btn-outline-secondary" disabled>
@@ -72,6 +84,7 @@ export function mount(container) {
 
   // ===== DOM =====
   const fileInput = container.querySelector("#fileInput");
+  const inputTypeEl = container.querySelector("#inputType");
   const btnPreview = container.querySelector("#btnPreview");
   const btnGenerate = container.querySelector("#btnGenerate");
   const statusEl = container.querySelector("#status");
@@ -83,6 +96,7 @@ export function mount(container) {
 
   // ===== Estado do módulo =====
   let rows = null;
+  let inputType = "XLS";
 
   // ===== Configs =====
   const FONT = "Roboto";
@@ -112,6 +126,69 @@ export function mount(container) {
   function updateButtons() {
     btnPreview.disabled = !rows;
     btnGenerate.disabled = !(rows && headerOk());
+  }
+
+  function inferSistemaFromProcesso(processoRaw) {
+    const processo = String(processoRaw ?? "").trim().replace(/\s+/g, "");
+    return /^\d{7}-\d$/.test(processo) ? "AP" : "E-TCE";
+  }
+
+  function mapPdfTextToRows(rawText) {
+    const text = String(rawText ?? "").replace(/\r/g, "");
+    const compact = text.replace(/[ \t]+/g, " ");
+
+    const relatorMap = new Map();
+    const relatorRegex = /RELATOR(?:A)?:\s*([^\n]+)/gi;
+    let relatorMatch = relatorRegex.exec(compact);
+    while (relatorMatch) {
+      relatorMap.set(relatorMatch.index, relatorMatch[1].trim());
+      relatorMatch = relatorRegex.exec(compact);
+    }
+
+    const processoRegex = /PROCESSO[\s\S]{0,80}?N[º°o]?\s*([0-9./-]+)\s*([\s\S]*?)(?=PROCESSO[\s\S]{0,80}?N[º°o]?\s*[0-9./-]+|RELATOR(?:A)?:|$)/gi;
+    const parsed = [];
+    let match = processoRegex.exec(compact);
+
+    while (match) {
+      const blocoInicio = match.index;
+      const processo = String(match[1] ?? "").trim();
+      const bloco = String(match[2] ?? "").trim();
+
+      let relator = "";
+      for (const [idx, nome] of relatorMap.entries()) {
+        if (idx <= blocoInicio) relator = nome;
+      }
+
+      const orgao = (bloco.match(/(?:ÓRGÃO|ORGAO):?\s*([^\n]+)/i)?.[1] ?? "").trim();
+      const tipoProcesso = (bloco.match(/TIPO\s+PROCESSO:?\s*([^\n]+)/i)?.[1] ?? "").trim();
+      const interessados = (bloco.match(/INTERESSADOS?:?\s*([\s\S]*?)(?=ADVOGADOS?:|$)/i)?.[1] ?? "")
+        .split(/\s*\|\s*|\s{2,}|\n/)
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .join("\n");
+      const advogados = (bloco.match(/ADVOGADOS?:?\s*([\s\S]*)$/i)?.[1] ?? "")
+        .split(/\s*\|\s*|\s{2,}|\n/)
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .join("\n");
+
+      parsed.push({
+        Relator: relator,
+        Processo: processo,
+        Órgão: orgao,
+        "Tipo Processo": tipoProcesso,
+        Interessados: interessados,
+        Advogados: advogados,
+      });
+
+      match = processoRegex.exec(compact);
+    }
+
+    if (!parsed.length) {
+      throw new Error("Não foi possível identificar os processos no PDF.");
+    }
+
+    return parsed;
   }
 
   // ===== Regras de tipo do relator =====
@@ -146,6 +223,20 @@ export function mount(container) {
     on(el, "change", updateButtons);
   });
 
+  on(inputTypeEl, "change", () => {
+    inputType = inputTypeEl.value === "PDF" ? "PDF" : "XLS";
+    fileInput.value = "";
+    rows = null;
+    previewEl.textContent = "";
+    fileInput.accept = inputType === "PDF" ? ".pdf" : ".xlsx";
+    setStatus(
+      inputType === "PDF"
+        ? "Tipo PDF selecionado. Escolha um arquivo .pdf."
+        : "Tipo XLS selecionado. Escolha um arquivo .xlsx."
+    );
+    updateButtons();
+  });
+
   // ===== Leitura do XLSX =====
   on(fileInput, "change", async (e) => {
     previewEl.textContent = "";
@@ -158,15 +249,21 @@ export function mount(container) {
       return;
     }
 
-    setStatus("Lendo XLSX...");
+    setStatus(inputType === "PDF" ? "Lendo PDF..." : "Lendo XLSX...");
 
     try {
-      rows = await readFirstSheetXlsxToJson(file);
-      setStatus(`XLSX OK. Linhas: ${rows.length}.`);
+      rows =
+        inputType === "PDF"
+          ? mapPdfTextToRows(await readPdfToText(file))
+          : await readFirstSheetXlsxToJson(file);
+      setStatus(`${inputType} OK. Linhas: ${rows.length}.`);
       updateButtons();
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || "Erro ao ler XLSX. Abra o Console (F12) e veja o erro.");
+      setStatus(
+        err?.message ||
+          `Erro ao ler ${inputType}. Abra o Console (F12) e veja o erro.`
+      );
       rows = null;
       updateButtons();
     }
@@ -295,17 +392,20 @@ export function mount(container) {
         children.push(blankLine(120));
 
         for (const row of processos) {
-          const sistema = upper(row["Sistema de Tramitação"]);
+          const sistema =
+            inputType === "PDF"
+              ? inferSistemaFromProcesso(row["Processo"])
+              : upper(row["Sistema de Tramitação"]) ||
+                inferSistemaFromProcesso(row["Processo"]);
           const processo = String(row["Processo"] ?? "").trim();
-          const voto = upper(row["Voto"]) === "LISTADO" ? " (Voto em lista)" : "";
 
           let label = "PROCESSO";
           let color = "000000";
           if (sistema === "E-TCE") {
-            label = "PROCESSO ELETRÔNICO eTCE";
+            label = "PROCESSO ELETRÔNICO";
             color = "FF0000";
           } else if (sistema === "AP") {
-            label = "PROCESSO DIGITAL TCE";
+            label = "PROCESSO DIGITAL";
             color = "0070C0";
           }
 
@@ -321,7 +421,7 @@ export function mount(container) {
                   font: FONT,
                 }),
                 new TextRun({
-                  text: `Nº ${processo}${voto}`,
+                  text: `Nº ${processo}`,
                   bold: true,
                   color: "000000",
                   size: SIZE_BODY,
