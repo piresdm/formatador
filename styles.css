@@ -94,3 +94,23 @@ select,
 input {
   margin-top: 8px;
 }
+
+/* ---- Responsividade ---- */
+
+@media (max-width: 576px) {
+  .djulg-logo {
+    height: 35px;
+  }
+
+  .djulg-title {
+    font-size: 1.2rem;
+  }
+
+  .djulg-subtitle {
+    font-size: 0.85rem;
+  }
+
+  .djulg-header {
+    padding: 16px 0;
+  }
+}
