@@ -99,15 +99,15 @@ input {
 
 @media (max-width: 576px) {
   .djulg-logo {
-    height: 35px;
+    height: 20px;
   }
 
   .djulg-title {
-    font-size: 1.2rem;
+    font-size: 1rem;
   }
 
   .djulg-subtitle {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
   }
 
   .djulg-header {
