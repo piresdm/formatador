@@ -1,25 +1,31 @@
+/* ---- Página ---- */
+body {
+  background-color: #f4f5f7;
+  font-size: 17px;
+}
+
 /* ---- Cabeçalho ---- */
 .djulg-header {
   background-color: #1e3a6e;
-  padding: 16px 0;
+  padding: 24px 0;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 2px 8px rgba(30, 58, 110, 0.4);
 }
 
 .djulg-header-inner {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 0 24px;
   display: flex;
   align-items: center;
   gap: 16px;
+  padding: 0px 12px;
 }
 
 .djulg-logo {
-  height: 56px;
+  height: 90px;
   width: auto;
 }
 
 .djulg-title {
-  font-size: 1.6rem;
+  font-size: 1.8rem;
   font-weight: 700;
   color: #ffffff;
   margin: 0 0 2px;
@@ -27,26 +33,43 @@
 }
 
 .djulg-subtitle {
-  font-size: 0.9rem;
+  font-size: 1.2rem;
   color: #a8bfe0;
   margin: 0;
 }
 
-/* ---- Página ---- */
-body {
-  background-color: #f4f5f7;
+.djulg-header-text {
+  padding-top: 12px;
 }
 
 /* ---- Botão principal ---- */
 .btn-primary {
-  background-color: #1e3a6e;
-  border-color: #1e3a6e;
+  --bs-btn-bg: #2f53a3;
+  --bs-btn-border-color: #2f53a3;
+  --bs-btn-hover-bg: #1e3a6e;
+  --bs-btn-hover-border-color: #1e3a6e;
+  --bs-btn-active-bg: #1e3a6e;
+  --bs-btn-active-border-color: #1e3a6e;
+  --bs-btn-disabled-bg: #2f53a3;
+  --bs-btn-disabled-border-color: #2f53a3;
 }
 
-.btn-primary:hover,
-.btn-primary:focus {
-  background-color: #16305e;
-  border-color: #16305e;
+.btn-outline-primary {
+  --bs-btn-color: #2f53a3;
+  --bs-btn-border-color: #2f53a3;
+  --bs-btn-hover-bg: #2f53a3;
+  --bs-btn-hover-border-color: #2f53a3;
+  --bs-btn-active-bg: #2f53a3;
+  --bs-btn-active-border-color: #2f53a3;
+  --bs-btn-disabled-color: #2f53a3;
+  --bs-btn-disabled-border-color: #2f53a3;
+}
+
+/* ---- Alert info ---- */
+.alert-info {
+  --bs-alert-color: #1e3a6e;
+  --bs-alert-bg: #e8eef7;
+  --bs-alert-border-color: #a8bfe0;
 }
 
 /* ---- Preview ---- */

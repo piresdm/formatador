@@ -17,7 +17,7 @@ export function mount(container) {
 
           <div class="d-flex flex-wrap gap-2 mt-3">
             <button id="btnGenerateLinks" class="btn btn-primary">Gerar coluna com link</button>
-            <button id="btnCopyLinks" class="btn btn-outline-secondary" disabled>Copiar tudo</button>
+            <button id="btnCopyLinks" class="btn btn-outline-primary" disabled>Copiar tudo</button>
           </div>
 
           <div class="mt-3">
@@ -94,7 +94,9 @@ export function mount(container) {
     btnCopy.disabled = output.length === 0;
 
     if (output.length === 0) {
-      setStatus("Nenhuma linha válida encontrada. Verifique se há 2 colunas (processo + link).");
+      setStatus(
+        "Nenhuma linha válida encontrada. Verifique se há 2 colunas (processo + link).",
+      );
       return;
     }
 
@@ -111,7 +113,9 @@ export function mount(container) {
     } catch (_err) {
       outputEl.focus();
       outputEl.select();
-      setStatus("Não foi possível copiar automaticamente. Use Ctrl+C na área de saída.");
+      setStatus(
+        "Não foi possível copiar automaticamente. Use Ctrl+C na área de saída.",
+      );
     }
   });
 
