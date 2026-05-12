@@ -1,16 +1,68 @@
+/* ---- Cabeçalho ---- */
+.djulg-header {
+  background-color: #1e3a6e;
+  padding: 16px 0;
+}
+
+.djulg-header-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.djulg-logo {
+  height: 56px;
+  width: auto;
+}
+
+.djulg-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 2px;
+  line-height: 1.2;
+}
+
+.djulg-subtitle {
+  font-size: 0.9rem;
+  color: #a8bfe0;
+  margin: 0;
+}
+
+/* ---- Página ---- */
+body {
+  background-color: #f4f5f7;
+}
+
+/* ---- Botão principal ---- */
+.btn-primary {
+  background-color: #1e3a6e;
+  border-color: #1e3a6e;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: #16305e;
+  border-color: #16305e;
+}
+
+/* ---- Preview ---- */
 #preview {
   min-height: 140px;
   white-space: pre-wrap;
 }
 
-/* Botão desabilitado mais visível */
+/* ---- Botão desabilitado ---- */
 button:disabled {
   opacity: 0.5 !important;
   cursor: not-allowed !important;
   box-shadow: none !important;
 }
 
-/* Um respiro padrão para módulos */
+/* ---- Módulos ---- */
 .module-card {
   margin-top: 12px;
 }
